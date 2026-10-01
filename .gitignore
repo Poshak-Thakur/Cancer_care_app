@@ -1,0 +1,74 @@
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+google-services.json
+GoogleService-Info.plist
+
+# ========================
+# Node.js Backend
+# ========================
+backend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+backend/coverage/
+backend/logs/
+
+# ========================
+# Flutter & Dart Frontend
+# ========================
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/.pub-cache/
+frontend/build/
+frontend/coverage/
+
+# Android Specific
+frontend/android/.gradle/
+frontend/android/.idea/
+frontend/android/*.iml
+frontend/android/local.properties
+frontend/android/captures/
+
+# iOS Specific
+frontend/ios/Pods/
+frontend/ios/.build/
+frontend/ios/DerivedData/
+frontend/ios/xcuserdata/
+frontend/ios/*.xcuserstate
+
+# ========================
+# Python & AI OCR
+# ========================
+ai/__pycache__/
+ai/*.py[cod]
+ai/*$py.class
+ai/.pytest_cache/
+ai/venv/
+ai/.venv/
+ai/env/
+# ML Models and Weights
+ai/*.pt
+ai/*.pth
+ai/*.onnx
+ai/*.tflite
+ai/*.h5
+ai/models/
+
+# ========================
+# OS & IDE Settings
+# ========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
