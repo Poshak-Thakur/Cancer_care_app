@@ -33,6 +33,12 @@ frontend/.pub-cache/
 frontend/build/
 frontend/coverage/
 
+# Prevent Unused Desktop/Web Platforms from Tracking
+frontend/linux/
+frontend/macos/
+frontend/web/
+frontend/windows/
+
 # Android Specific
 frontend/android/.gradle/
 frontend/android/.idea/
@@ -57,6 +63,7 @@ ai/.pytest_cache/
 ai/venv/
 ai/.venv/
 ai/env/
+
 # ML Models and Weights
 ai/*.pt
 ai/*.pth
