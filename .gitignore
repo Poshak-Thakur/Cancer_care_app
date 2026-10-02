@@ -1,81 +1,363 @@
-# ========================
-# Environment & Secrets
-# ========================
+# ============================================================
+# CANCER CARE APP - ROOT .gitignore
+# ============================================================
+
+
+# ============================================================
+# ENVIRONMENT VARIABLES & SECRETS
+# ============================================================
+
 .env
 .env.*
 !.env.example
+
 *.pem
 *.key
 *.p12
+*.pfx
 *.jks
 *.keystore
+
 google-services.json
 GoogleService-Info.plist
 
-# ========================
-# Node.js Backend
-# ========================
-backend/node_modules/
+service-account*.json
+firebase-adminsdk*.json
+
+credentials/
+secrets/
+
+
+# ============================================================
+# NODE.JS / JAVASCRIPT / TYPESCRIPT
+# ============================================================
+
+node_modules/
+
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
+pnpm-debug.log*
+
+.npm/
+.pnpm-store/
+
+dist/
+build/
+
+coverage/
+.nyc_output/
+
+.vite/
+.next/
+.nuxt/
+.output/
+
+*.tsbuildinfo
+
+
+# ============================================================
+# BACKEND
+# ============================================================
+
+backend/node_modules/
 backend/coverage/
 backend/logs/
+backend/tmp/
+backend/temp/
 
-# ========================
-# Flutter & Dart Frontend
-# ========================
-frontend/.dart_tool/
-frontend/.flutter-plugins
-frontend/.flutter-plugins-dependencies
-frontend/.packages
-frontend/.pub-cache/
-frontend/build/
-frontend/coverage/
+backend/uploads/
+backend/storage/
 
-# Prevent Unused Desktop/Web Platforms from Tracking
-frontend/linux/
-frontend/macos/
-frontend/web/
-frontend/windows/
+# Local database files
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
 
-# Android Specific
-frontend/android/.gradle/
-frontend/android/.idea/
-frontend/android/*.iml
-frontend/android/local.properties
-frontend/android/captures/
 
-# iOS Specific
-frontend/ios/Pods/
-frontend/ios/.build/
-frontend/ios/DerivedData/
-frontend/ios/xcuserdata/
-frontend/ios/*.xcuserstate
+# ============================================================
+# NGO WEB
+# ============================================================
 
-# ========================
-# Python & AI OCR
-# ========================
-ai/__pycache__/
-ai/*.py[cod]
-ai/*$py.class
-ai/.pytest_cache/
+ngo_web/node_modules/
+ngo_web/dist/
+ngo_web/build/
+ngo_web/coverage/
+
+ngo_web/.vite/
+ngo_web/.next/
+ngo_web/.nuxt/
+ngo_web/.output/
+
+
+# ============================================================
+# FLUTTER / DART MOBILE APP
+# ============================================================
+
+mobile_app/.dart_tool/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/.packages
+mobile_app/.pub-cache/
+
+mobile_app/build/
+mobile_app/coverage/
+
+mobile_app/.flutter_tool_state
+
+
+# ============================================================
+# ANDROID
+# ============================================================
+
+mobile_app/android/.gradle/
+mobile_app/android/build/
+mobile_app/android/app/build/
+mobile_app/android/.cxx/
+
+mobile_app/android/.idea/
+mobile_app/android/local.properties
+
+*.apk
+*.aab
+
+
+# ============================================================
+# IOS / XCODE
+# ============================================================
+
+mobile_app/ios/Pods/
+mobile_app/ios/.symlinks/
+mobile_app/ios/Flutter/ephemeral/
+mobile_app/ios/Flutter/.last_build_id
+
+mobile_app/ios/build/
+mobile_app/ios/DerivedData/
+mobile_app/ios/xcuserdata/
+
+mobile_app/ios/*.xcuserstate
+*.xcuserdatad/
+
+
+# ============================================================
+# FLUTTER DESKTOP / WEB
+# ============================================================
+# The project currently targets Android/iOS.
+# Remove these if Flutter Web/Desktop is enabled later.
+
+mobile_app/linux/
+mobile_app/macos/
+mobile_app/web/
+mobile_app/windows/
+
+
+# ============================================================
+# PYTHON / AI / OCR
+# ============================================================
+
+venv/
+.venv/
+env/
+ENV/
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.coverage
+.coverage.*
+htmlcov/
+
+.ipynb_checkpoints/
+
+
+# AI environment
 ai/venv/
 ai/.venv/
 ai/env/
 
-# ML Models and Weights
-ai/*.pt
-ai/*.pth
-ai/*.onnx
-ai/*.tflite
-ai/*.h5
-ai/models/
+# OCR environment
+ocr/venv/
+ocr/.venv/
+ocr/env/
 
-# ========================
-# OS & IDE Settings
-# ========================
+
+# ============================================================
+# AI / ML MODELS
+# ============================================================
+
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.h5
+*.hdf5
+*.ckpt
+*.safetensors
+
+ai/models/
+ocr/models/
+models/
+checkpoints/
+
+wandb/
+mlruns/
+runs/
+
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Database dumps / backups
+*.dump
+*.bak
+
+database/local/
+database/data/
+database/backups/
+
+# IMPORTANT:
+# database/schema/
+# database/migrations/
+# database/seeds/
+# are intentionally NOT ignored.
+
+
+# ============================================================
+# LOGS
+# ============================================================
+
+*.log
+logs/
+**/logs/
+
+
+# ============================================================
+# TEMPORARY / CACHE FILES
+# ============================================================
+
+tmp/
+temp/
+.cache/
+
+*.cache
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+
+
+# ============================================================
+# TEST ARTIFACTS
+# ============================================================
+
+test-results/
+playwright-report/
+allure-results/
+allure-report/
+
+screenshots/
+videos/
+
+
+# ============================================================
+# DOCUMENTATION GENERATED OUTPUT
+# ============================================================
+
+docs/generated/
+docs/build/
+
+
+# ============================================================
+# DOCKER / LOCAL DEVELOPMENT
+# ============================================================
+
+.docker/
+
+docker-compose.override.yml
+docker-compose.local.yml
+
+
+# ============================================================
+# TERRAFORM / INFRASTRUCTURE
+# ============================================================
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+
+!*.tfvars.example
+
+
+# ============================================================
+# DEPLOYMENT / HOSTING
+# ============================================================
+
+.vercel/
+.netlify/
+.serverless/
+
+
+# ============================================================
+# IDE / EDITOR
+# ============================================================
+
 .vscode/
 .idea/
+
+.vs/
+
+*.iml
+*.suo
+*.user
+*.userosscache
+*.userprefs
+
+*.swp
+*.swo
+*~
+
+
+# ============================================================
+# OPERATING SYSTEM
+# ============================================================
+
 .DS_Store
+.DS_Store?
+._*
+
+.Spotlight-V100
+.Trashes
+
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+$RECYCLE.BIN/
+
+
+# ============================================================
+# LOCAL DEVELOPMENT OVERRIDES
+# ============================================================
+
+*.local
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Keep example files
+!*.example
+!*.example.*
