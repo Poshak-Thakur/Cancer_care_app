@@ -1,0 +1,594 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// CORE CLINICAL & USER MODELS (EXISTING)
+// ==========================================
+
+model alert {
+  id                  String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id          String            @db.Uuid
+  type                alert_type_enum
+  source_type         String?           @db.VarChar(50)
+  source_id           String?           @db.Uuid
+  severity            String            @db.VarChar(50)
+  status              alert_status_enum @default(OPEN)
+  client_event_id     String?           @unique @db.Uuid
+  rule_id             String?           @db.VarChar(100)
+  rule_version        String?           @db.VarChar(50)
+  rule_cooldown_until DateTime?         @db.Timestamptz(6)
+  created_at          DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime          @default(now()) @db.Timestamptz(6)
+  patient             patient           @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  alertrecipient      alertrecipient[]
+  alertupdate         alertupdate[]
+
+  @@index([patient_id, status], map: "idx_alert_patient_status")
+}
+
+model alertdelivery {
+  id                 String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  alert_recipient_id String                @db.Uuid
+  channel            delivery_channel_enum
+  delivery_status    delivery_status_enum  @default(QUEUED)
+  failure_reason     String?
+  queued_at          DateTime              @default(now()) @db.Timestamptz(6)
+  sent_at            DateTime?             @db.Timestamptz(6)
+  delivered_at       DateTime?             @db.Timestamptz(6)
+  seen_at            DateTime?             @db.Timestamptz(6)
+  failed_at          DateTime?             @db.Timestamptz(6)
+  alertrecipient     alertrecipient        @relation(fields: [alert_recipient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([alert_recipient_id, delivery_status], map: "idx_delivery_status")
+}
+
+model alertrecipient {
+  id                                                        String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  alert_id                                                  String          @db.Uuid
+  recipient_user_id                                         String          @db.Uuid
+  acknowledged_at                                           DateTime?       @db.Timestamptz(6)
+  response_note                                             String?
+  resolution                                                String?         @db.VarChar(255)
+  resolver_id                                               String?         @db.Uuid
+  alertdelivery                                             alertdelivery[]
+  alert                                                     alert           @relation(fields: [alert_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount_alertrecipient_recipient_user_idTouseraccount useraccount     @relation("alertrecipient_recipient_user_idTouseraccount", fields: [recipient_user_id], references: [id], onUpdate: NoAction)
+  useraccount_alertrecipient_resolver_idTouseraccount       useraccount?    @relation("alertrecipient_resolver_idTouseraccount", fields: [resolver_id], references: [id], onUpdate: NoAction)
+
+  @@unique([alert_id, recipient_user_id], map: "uq_alert_recipient")
+}
+
+model alertupdate {
+  id          String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  alert_id    String      @db.Uuid
+  created_by  String      @db.Uuid
+  type        String      @db.VarChar(50)
+  note        String?
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+  alert       alert       @relation(fields: [alert_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount useraccount @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+}
+
+model auditlogentry {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actor_id        String?      @db.Uuid
+  target_resource String       @db.VarChar(100)
+  target_id       String       @db.Uuid
+  action          String       @db.VarChar(50)
+  payload         Json?
+  ip_address      String?      @db.VarChar(45)
+  user_agent      String?
+  created_at      DateTime     @default(now()) @db.Timestamptz(6)
+  useraccount     useraccount? @relation(fields: [actor_id], references: [id], onUpdate: NoAction)
+
+  @@index([target_resource, target_id], map: "idx_audit_target")
+}
+
+model authotp {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email          String   @db.Citext
+  otp_hash       String   @db.VarChar(255)
+  attempts_count Int      @default(0)
+  expires_at     DateTime @db.Timestamptz(6)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([email, expires_at], map: "idx_auth_otp_lookup")
+}
+
+model careevent {
+  id                    String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id            String                 @db.Uuid
+  patient_medication_id String?                @db.Uuid
+  type                  care_event_type_enum
+  schedule_time         DateTime               @db.Timestamptz(6)
+  assignee_user_id      String?                @db.Uuid
+  reminder_rule         Json?
+  completion_status     care_event_status_enum @default(SCHEDULED)
+  completed_at          DateTime?              @db.Timestamptz(6)
+  created_at            DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime               @default(now()) @db.Timestamptz(6)
+  useraccount           useraccount?           @relation(fields: [assignee_user_id], references: [id], onUpdate: NoAction)
+  patient               patient                @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patientmedication     patientmedication?     @relation(fields: [patient_medication_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id, schedule_time, completion_status], map: "idx_care_event_schedule")
+}
+
+model caregiverprofile {
+  id               String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String                @unique @db.Uuid
+  caregiver_type   caregiver_type_enum
+  volunteer_status volunteer_status_enum @default(PENDING)
+  training_status  training_status_enum  @default(NOT_STARTED)
+  created_at       DateTime              @default(now()) @db.Timestamptz(6)
+  useraccount      useraccount           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model consentrecord {
+  id                                                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id                                        String              @db.Uuid
+  grantee_id                                        String              @db.Uuid
+  data_scope                                        String              @db.VarChar(100)
+  status                                            consent_status_enum @default(GRANTED)
+  granted_by                                        String              @db.Uuid
+  granted_at                                        DateTime            @default(now()) @db.Timestamptz(6)
+  revoked_at                                        DateTime?           @db.Timestamptz(6)
+  useraccount_consentrecord_granted_byTouseraccount useraccount         @relation("consentrecord_granted_byTouseraccount", fields: [granted_by], references: [id], onUpdate: NoAction)
+  useraccount_consentrecord_grantee_idTouseraccount useraccount         @relation("consentrecord_grantee_idTouseraccount", fields: [grantee_id], references: [id], onUpdate: NoAction)
+  patient                                           patient             @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([patient_id, grantee_id, data_scope, status], map: "idx_consent_active")
+}
+
+model patient {
+  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  full_name            String                 @db.VarChar(255)
+  date_of_birth        DateTime               @db.Date
+  preferred_language   String                 @default("en") @db.VarChar(10)
+  cancer_type          String?                @db.VarChar(255)
+  cancer_stage         String?                @db.VarChar(50)
+  diagnosis_date       DateTime?              @db.Date
+  care_plan_summary    String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  alert                alert[]
+  careevent            careevent[]
+  consentrecord        consentrecord[]
+  patientaccountlink   patientaccountlink[]
+  patientcaregiverlink patientcaregiverlink[]
+  patientmedication    patientmedication[]
+  prescription         prescription[]
+  staffassignment      staffassignment[]
+  symptomevent         symptomevent[]
+  chatconversation     chatconversation[]
+  medicaldocument      medicaldocument[]
+}
+
+model patientaccountlink {
+  id                                                     String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                                                String              @db.Uuid
+  patient_id                                             String              @db.Uuid
+  relationship_type                                      account_link_type
+  relationship_label                                     String?             @db.VarChar(100)
+  access_scopes                                          Json                @default("[]")
+  consent_status                                         consent_status_enum @default(GRANTED)
+  granted_by                                             String?             @db.Uuid
+  granted_at                                             DateTime            @default(now()) @db.Timestamptz(6)
+  revoked_at                                             DateTime?           @db.Timestamptz(6)
+  useraccount_patientaccountlink_granted_byTouseraccount useraccount?        @relation("patientaccountlink_granted_byTouseraccount", fields: [granted_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  patient                                                patient             @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount_patientaccountlink_user_idTouseraccount    useraccount         @relation("patientaccountlink_user_idTouseraccount", fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([user_id, patient_id], map: "uq_user_patient_link")
+  @@index([user_id, patient_id], map: "idx_account_link_lookup")
+}
+
+model patientcaregiverlink {
+  id                 String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id         String                      @db.Uuid
+  caregiver_user_id  String                      @db.Uuid
+  is_primary         Boolean                     @default(false)
+  relationship_label String?                     @db.VarChar(100)
+  access_scopes      Json                        @default("[]")
+  availability       caregiver_availability_enum @default(AVAILABLE)
+  consent_status     consent_status_enum         @default(GRANTED)
+  revoked_at         DateTime?                   @db.Timestamptz(6)
+  created_at         DateTime                    @default(now()) @db.Timestamptz(6)
+  useraccount        useraccount                 @relation(fields: [caregiver_user_id], references: [id], onUpdate: NoAction)
+  patient            patient                     @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([patient_id, caregiver_user_id], map: "uq_patient_caregiver")
+  @@index([patient_id, caregiver_user_id], map: "idx_caregiver_patient")
+}
+
+model patientmedication {
+  id                                                     String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id                                             String                   @db.Uuid
+  name                                                   String                   @db.VarChar(255)
+  strength                                               String?                  @db.VarChar(100)
+  form                                                   String?                  @db.VarChar(100)
+  kind                                                   medication_kind_enum     @default(SCHEDULED)
+  instructions                                           String?
+  verification_status                                    verification_status_enum @default(PENDING)
+  source_prescription_id                                 String?                  @db.Uuid
+  entered_by                                             String                   @db.Uuid
+  verified_by                                            String?                  @db.Uuid
+  verified_at                                            DateTime?                @db.Timestamptz(6)
+  created_at                                             DateTime                 @default(now()) @db.Timestamptz(6)
+  careevent                                              careevent[]
+  useraccount_patientmedication_entered_byTouseraccount  useraccount              @relation("patientmedication_entered_byTouseraccount", fields: [entered_by], references: [id], onUpdate: NoAction)
+  patient                                                patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  prescription                                           prescription?            @relation(fields: [source_prescription_id], references: [id], onUpdate: NoAction)
+  useraccount_patientmedication_verified_byTouseraccount useraccount?             @relation("patientmedication_verified_byTouseraccount", fields: [verified_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([patient_id, verification_status], map: "idx_medication_patient")
+}
+
+model prescription {
+  id                     String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id             String                   @db.Uuid
+  file_path              String                   @db.VarChar(1024)
+  mime_type              String                   @db.VarChar(100)
+  file_size_bytes        BigInt
+  uploaded_by            String                   @db.Uuid
+  uploaded_at            DateTime                 @default(now()) @db.Timestamptz(6)
+  patientmedication      patientmedication[]
+  patient                patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount            useraccount              @relation(fields: [uploaded_by], references: [id], onUpdate: NoAction)
+  prescriptionextraction prescriptionextraction[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model prescriptionextraction {
+  id               String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  prescription_id  String       @db.Uuid
+  extracted_text   String
+  raw_payload      Json
+  confidence_score Decimal?     @db.Decimal(4, 3)
+  processed_at     DateTime     @default(now()) @db.Timestamptz(6)
+  prescription     prescription @relation(fields: [prescription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model refreshtoken {
+  id          String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id     String      @db.Uuid
+  token_hash  String      @unique @db.VarChar(255)
+  revoked     Boolean     @default(false)
+  expires_at  DateTime    @db.Timestamptz(6)
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+  useraccount useraccount @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_refresh_token_user")
+}
+
+model staffassignment {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id    String          @db.Uuid
+  staff_user_id String          @db.Uuid
+  role          staff_role_enum
+  is_primary    Boolean         @default(false)
+  active_from   DateTime        @default(now()) @db.Timestamptz(6)
+  active_until  DateTime?       @db.Timestamptz(6)
+  status        String          @default("ACTIVE") @db.VarChar(50)
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  patient       patient         @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount   useraccount     @relation(fields: [staff_user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([patient_id, role], map: "uq_primary_staff_per_role", where: raw("((is_primary = true) AND ((status)::text = 'ACTIVE'::text))"))
+}
+
+model staffprofile {
+  id          String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id     String      @unique @db.Uuid
+  roles       Json        @default("[]")
+  is_active   Boolean     @default(true)
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+  useraccount useraccount @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model symptomevent {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id         String               @db.Uuid
+  recorded_by        String               @db.Uuid
+  source             symptom_source_enum
+  client_event_id    String               @unique @db.Uuid
+  sync_state         String               @default("SYNCED") @db.VarChar(50)
+  recorded_at        DateTime             @default(now()) @db.Timestamptz(6)
+  patient            patient              @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  useraccount        useraccount          @relation(fields: [recorded_by], references: [id], onUpdate: NoAction)
+  symptomobservation symptomobservation[]
+
+  @@index([patient_id, recorded_at(sort: Desc)], map: "idx_symptom_event_patient")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model symptomobservation {
+  id               String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  symptom_event_id String       @db.Uuid
+  observation_type String       @db.VarChar(50)
+  severity         Int?
+  numeric_value    Decimal?     @db.Decimal(6, 2)
+  unit             String?      @db.VarChar(20)
+  note             String?
+  symptomevent     symptomevent @relation(fields: [symptom_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([symptom_event_id], map: "idx_symptom_obs_parent")
+}
+
+model useraccount {
+  id                                                            String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email                                                         String                 @unique @db.Citext
+  phone_number                                                  String?                @db.VarChar(32)
+  preferred_language                                            String                 @default("en") @db.VarChar(10)
+  status                                                        String                 @default("ACTIVE") @db.VarChar(50)
+  created_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
+  alertrecipient_alertrecipient_recipient_user_idTouseraccount  alertrecipient[]       @relation("alertrecipient_recipient_user_idTouseraccount")
+  alertrecipient_alertrecipient_resolver_idTouseraccount        alertrecipient[]       @relation("alertrecipient_resolver_idTouseraccount")
+  alertupdate                                                   alertupdate[]
+  auditlogentry                                                 auditlogentry[]
+  careevent                                                     careevent[]
+  caregiverprofile                                              caregiverprofile?
+  consentrecord_consentrecord_granted_byTouseraccount           consentrecord[]        @relation("consentrecord_granted_byTouseraccount")
+  consentrecord_consentrecord_grantee_idTouseraccount           consentrecord[]        @relation("consentrecord_grantee_idTouseraccount")
+  patientaccountlink_patientaccountlink_granted_byTouseraccount patientaccountlink[]   @relation("patientaccountlink_granted_byTouseraccount")
+  patientaccountlink_patientaccountlink_user_idTouseraccount    patientaccountlink[]   @relation("patientaccountlink_user_idTouseraccount")
+  patientcaregiverlink                                          patientcaregiverlink[]
+  patientmedication_patientmedication_entered_byTouseraccount   patientmedication[]    @relation("patientmedication_entered_byTouseraccount")
+  patientmedication_patientmedication_verified_byTouseraccount  patientmedication[]    @relation("patientmedication_verified_byTouseraccount")
+  prescription                                                  prescription[]
+  refreshtoken                                                  refreshtoken[]
+  staffassignment                                               staffassignment[]
+  staffprofile                                                  staffprofile?
+  symptomevent                                                  symptomevent[]
+  communitypost_author                                          communitypost[]        @relation("post_author")
+  communitypost_moderator                                       communitypost[]        @relation("post_moderator")
+  chatconversation_counselor                                    chatconversation[]
+  chatmessage_sender                                            chatmessage[]
+  callsession_caller                                            callsession[]          @relation("call_caller")
+  callsession_receiver                                          callsession[]          @relation("call_receiver")
+  medicaldocument_uploader                                      medicaldocument[]      @relation("doc_uploader")
+}
+
+// ==========================================
+// NEW FEATURE ENUMS
+// ==========================================
+
+enum post_visibility_enum {
+  PUBLIC
+  PRIVATE
+}
+
+enum post_status_enum {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum message_type_enum {
+  TEXT
+  IMAGE
+  AUDIO
+  SYSTEM
+}
+
+enum call_status_enum {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  MISSED
+}
+
+enum document_type_enum {
+  PRESCRIPTION
+  LAB_REPORT
+  SCAN
+  DISCHARGE_SUMMARY
+  OTHER
+}
+
+// ==========================================
+// NEW FEATURE MODELS
+// ==========================================
+
+model communitypost {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  author_id          String               @db.Uuid
+  content            String               @db.Text
+  media_url          String?              @db.VarChar(1024)
+  visibility         post_visibility_enum @default(PUBLIC)
+  status             post_status_enum     @default(PENDING)
+  moderator_feedback String?              @db.Text
+  moderator_id       String?              @db.Uuid
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+
+  author             useraccount          @relation("post_author", fields: [author_id], references: [id], onDelete: Cascade)
+  moderator          useraccount?         @relation("post_moderator", fields: [moderator_id], references: [id], onDelete: SetNull)
+
+  @@index([status, visibility], map: "idx_post_moderation")
+}
+
+model chatconversation {
+  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id   String        @db.Uuid
+  counselor_id String?       @db.Uuid
+  created_at   DateTime      @default(now()) @db.Timestamptz(6)
+
+  patient      patient       @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  counselor    useraccount?  @relation(fields: [counselor_id], references: [id], onDelete: SetNull)
+  messages     chatmessage[]
+
+  @@index([patient_id], map: "idx_chat_patient")
+}
+
+model chatmessage {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String            @db.Uuid
+  sender_id       String            @db.Uuid
+  message_type    message_type_enum @default(TEXT)
+  content         String?           @db.Text
+  media_url       String?           @db.VarChar(1024)
+  is_read         Boolean           @default(false)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+
+  conversation    chatconversation  @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender          useraccount       @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at], map: "idx_chat_history")
+}
+
+model callsession {
+  id            String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  caller_id     String           @db.Uuid
+  receiver_id   String           @db.Uuid
+  status        call_status_enum @default(SCHEDULED)
+  provider_room String?          @db.VarChar(255)
+  scheduled_for DateTime?        @db.Timestamptz(6)
+  started_at    DateTime?        @db.Timestamptz(6)
+  ended_at      DateTime?        @db.Timestamptz(6)
+  created_at    DateTime         @default(now()) @db.Timestamptz(6)
+
+  caller        useraccount      @relation("call_caller", fields: [caller_id], references: [id], onDelete: Cascade)
+  receiver      useraccount      @relation("call_receiver", fields: [receiver_id], references: [id], onDelete: Cascade)
+
+  @@index([caller_id, receiver_id], map: "idx_call_participants")
+}
+
+model medicaldocument {
+  id                  String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id          String                   @db.Uuid
+  document_type       document_type_enum       @default(OTHER)
+  title               String                   @db.VarChar(255)
+  file_path           String                   @db.VarChar(1024)
+  mime_type           String                   @db.VarChar(100)
+  file_size_bytes     BigInt
+  extracted_text      String?                  @db.Text
+  raw_ocr_payload     Json?
+  verification_status verification_status_enum @default(PENDING)
+  is_private          Boolean                  @default(true)
+  uploaded_by         String                   @db.Uuid
+  uploaded_at         DateTime                 @default(now()) @db.Timestamptz(6)
+
+  patient             patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  uploader            useraccount              @relation("doc_uploader", fields: [uploaded_by], references: [id], onDelete: NoAction)
+
+  @@index([patient_id, document_type], map: "idx_medical_doc_patient")
+}
+
+// ==========================================
+// EXISTING ENUMS
+// ==========================================
+
+enum account_link_type {
+  SELF
+  DELEGATE
+}
+
+enum alert_status_enum {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+  ESCALATION_EXHAUSTED
+}
+
+enum alert_type_enum {
+  DETERIORATION
+  HELP_REQUEST
+  MISSED_MEDICATION
+  MISSED_FOLLOWUP
+}
+
+enum care_event_status_enum {
+  SCHEDULED
+  DUE
+  COMPLETED
+  MISSED
+  SNOOZED
+  CANCELLED
+}
+
+enum care_event_type_enum {
+  MEDICATION_DOSE
+  APPOINTMENT
+  THERAPY_SESSION
+  COUNSELLOR_FOLLOWUP
+  HOME_VISIT
+  OTHER
+}
+
+enum caregiver_availability_enum {
+  AVAILABLE
+  UNAVAILABLE
+  DO_NOT_DISTURB
+}
+
+enum caregiver_type_enum {
+  FAMILY
+  VOLUNTEER
+}
+
+enum consent_status_enum {
+  GRANTED
+  REVOKED
+}
+
+enum delivery_channel_enum {
+  PUSH
+  SMS
+}
+
+enum delivery_status_enum {
+  LOCAL_ONLY
+  QUEUED
+  SENT
+  DELIVERED
+  SEEN
+  FAILED
+}
+
+enum medication_kind_enum {
+  SCHEDULED
+  PRN
+  ONE_TIME
+  COURSE
+}
+
+enum staff_role_enum {
+  COUNSELLOR
+  CLINICIAN
+  CONTENT_REVIEWER
+  ADMIN
+}
+
+enum symptom_source_enum {
+  ROUTINE
+  UPDATE
+}
+
+enum training_status_enum {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETE
+}
+
+enum verification_status_enum {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum volunteer_status_enum {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}

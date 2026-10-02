@@ -1,0 +1,16 @@
+# Dependency directories
+node_modules/
+
+# Environment variables (CRITICAL: Never commit this)
+.env
+
+# AI Coding Assistant / Local Environment Artifacts
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
