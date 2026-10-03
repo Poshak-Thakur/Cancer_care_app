@@ -1,20 +1,11 @@
 const prisma = require('../config/db');
 
-const verifyAccess = async (userId, patientId) => {
-    return await prisma.patientaccountlink.findFirst({
-        where: { user_id: userId, patient_id: patientId, consent_status: 'GRANTED' }
-    });
-};
-
 exports.getDashboardOverview = async (req, res, next) => {
     try {
         const { patient_id } = req.params;
-        const userId = req.user.userId;
-
-        const access = await verifyAccess(userId, patient_id);
-        if (!access) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient.' });
-        }
+        
+        // The rbacMiddleware already validated access and attached the specific link
+        const accessLink = req.accessContext.link;
 
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
@@ -79,8 +70,8 @@ exports.getDashboardOverview = async (req, res, next) => {
         return res.status(200).json({
             status: 'success',
             data: {
-                relationship: access.relationship_label,
-                access_scopes: access.access_scopes,
+                relationship: accessLink.relationship_label || 'Staff',
+                access_scopes: accessLink.access_scopes || ['ALL'],
                 profile: patient,
                 care_tasks: {
                     total_today: todayEvents.length,

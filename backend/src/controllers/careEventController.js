@@ -1,99 +1,111 @@
 const prisma = require('../config/db');
+const { verifyPatientDataEventAccess } = require('../services/authorizationService');
 
-// Helper function to enforce Role-Based Access Control (RBAC)
-const verifyAccess = async (userId, patientId) => {
-    return await prisma.patientaccountlink.findFirst({
-        where: { user_id: userId, patient_id: patientId, consent_status: 'GRANTED' }
-    });
-};
+const VALID_EVENT_TYPES = ['MEDICATION_DOSE', 'APPOINTMENT', 'THERAPY_SESSION', 'COUNSELLOR_FOLLOWUP', 'HOME_VISIT', 'OTHER'];
+const VALID_COMPLETION_STATUSES = ['SCHEDULED', 'DUE', 'COMPLETED', 'MISSED', 'SNOOZED', 'CANCELLED'];
 
 exports.getDailyEvents = async (req, res, next) => {
     try {
         const { patient_id } = req.params;
-        const { date } = req.query; // Expected format: YYYY-MM-DD
+        const { date } = req.query;
         const userId = req.user.userId;
 
-        if (!await verifyAccess(userId, patient_id)) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient.' });
+        if (!patient_id) {
+            return res.status(400).json({ status: 'error', message: 'patient_id is required.' });
         }
 
-        // Default to today if no date is provided
+        const hasAccess = await verifyPatientDataEventAccess(userId, patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
+        }
+
         const targetDate = date ? new Date(date) : new Date();
-        const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-        const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+        const startOfDay = new Date(targetDate);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        const endOfDay = new Date(targetDate);
+        endOfDay.setUTCHours(23, 59, 59, 999);
 
         const events = await prisma.careevent.findMany({
-            where: {
-                patient_id,
-                schedule_time: {
-                    gte: startOfDay,
-                    lte: endOfDay
-                }
+            where: { 
+                patient_id, 
+                schedule_time: { gte: startOfDay, lte: endOfDay } 
             },
-            include: {
-                patientmedication: {
-                    select: { name: true, strength: true, form: true, instructions: true }
-                }
+            include: { 
+                patientmedication: { select: { name: true, instructions: true, strength: true, form: true } } 
             },
             orderBy: { schedule_time: 'asc' }
         });
 
         return res.status(200).json({ status: 'success', data: events });
-    } catch (error) {
-        next(error);
+    } catch (error) { 
+        next(error); 
     }
 };
 
 exports.createEvent = async (req, res, next) => {
     try {
-        const { patient_id, type, schedule_time, patient_medication_id, reminder_rule } = req.body;
+        const { patient_id, type, schedule_time, reminder_rule, patient_medication_id } = req.body;
         const userId = req.user.userId;
 
-        if (!await verifyAccess(userId, patient_id)) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient.' });
+        if (!patient_id || !type || !schedule_time) {
+            return res.status(400).json({ status: 'error', message: 'patient_id, type, and schedule_time are required.' });
         }
 
-        const newEvent = await prisma.careevent.create({
+        if (!VALID_EVENT_TYPES.includes(type)) {
+            return res.status(400).json({ status: 'error', message: `Invalid care event type: ${type}.` });
+        }
+
+        const hasAccess = await verifyPatientDataEventAccess(userId, patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
+        }
+
+        const event = await prisma.careevent.create({
             data: {
                 patient_id,
-                type, // Enum: MEDICATION_DOSE, APPOINTMENT, THERAPY_SESSION, OTHER
+                type,
                 schedule_time: new Date(schedule_time),
+                reminder_rule: reminder_rule || null,
                 patient_medication_id: patient_medication_id || null,
-                assignee_user_id: userId,
-                reminder_rule: reminder_rule || null
+                assignee_user_id: userId
             }
         });
 
-        return res.status(201).json({ status: 'success', data: newEvent });
-    } catch (error) {
-        next(error);
+        return res.status(201).json({ status: 'success', data: event });
+    } catch (error) { 
+        next(error); 
     }
 };
 
 exports.updateEventStatus = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { completion_status } = req.body; // Enum: COMPLETED, MISSED, SNOOZED, CANCELLED
+        const { completion_status } = req.body;
         const userId = req.user.userId;
 
-        // Fetch event to get patient_id for RBAC check
-        const event = await prisma.careevent.findUnique({ where: { id } });
-        if (!event) return res.status(404).json({ status: 'error', message: 'Event not found' });
+        if (!VALID_COMPLETION_STATUSES.includes(completion_status)) {
+            return res.status(400).json({ status: 'error', message: `Invalid completion_status: ${completion_status}.` });
+        }
 
-        if (!await verifyAccess(userId, event.patient_id)) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access.' });
+        const event = await prisma.careevent.findUnique({ where: { id } });
+        if (!event) return res.status(404).json({ status: 'error', message: 'Care event not found.' });
+
+        // Access check uses the event's immutable patient_id
+        const hasAccess = await verifyPatientDataEventAccess(userId, event.patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to modify this event.' });
         }
 
         const updatedEvent = await prisma.careevent.update({
             where: { id },
-            data: {
-                completion_status,
-                completed_at: completion_status === 'COMPLETED' ? new Date() : null
+            data: { 
+                completion_status, 
+                completed_at: completion_status === 'COMPLETED' ? new Date() : null 
             }
         });
 
         return res.status(200).json({ status: 'success', data: updatedEvent });
-    } catch (error) {
-        next(error);
+    } catch (error) { 
+        next(error); 
     }
 };

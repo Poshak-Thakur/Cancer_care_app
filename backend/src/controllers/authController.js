@@ -3,72 +3,82 @@ const argon2 = require('argon2');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
+const getUserRoles = async (userId) => {
+    const roles = [];
+    const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
+    if (isStaff) roles.push('STAFF');
+
+    // FIX: Include DELEGATE accounts
+    const isPatient = await prisma.patientaccountlink.findFirst({ 
+        where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] } } 
+    });
+    if (isPatient) roles.push('PATIENT');
+
+    const isCaregiver = await prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: userId } });
+    if (isCaregiver) roles.push('CAREGIVER');
+
+    return roles.length > 0 ? roles : ['NEW_USER'];
+};
+
+const generateRefreshToken = async (userId) => {
+    const rawString = crypto.randomBytes(32).toString('hex');
+    const rawToken = `${userId}.${rawString}`;
+    const tokenHash = await argon2.hash(rawString);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); 
+
+    await prisma.refreshtoken.create({
+        data: { user_id: userId, token_hash: tokenHash, expires_at: expiresAt }
+    });
+    return rawToken;
+};
+
 exports.requestOtp = async (req, res, next) => {
     try {
         const { email } = req.body;
-        if (!email) {
-            return res.status(400).json({ status: 'error', message: 'Email is required' });
-        }
+        if (!email) return res.status(400).json({ status: 'error', message: 'Email is required' });
 
-        // Generate a cryptographically secure 6-digit OTP
-        const rawOtp = crypto.randomInt(100000, 999999).toString();
-        
-        // Hash with Argon2 for secure database storage
+        const cleanEmail = email.trim().toLowerCase();
+        const rawOtp = crypto.randomInt(100000, 1000000).toString();
         const otpHash = await argon2.hash(rawOtp);
-        
-        // Set expiration to 10 minutes from now
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        // Delete any existing unused OTPs for this email to prevent spam/clutter
-        // Note: Using the exact lowercase model name Prisma generated
-        await prisma.authotp.deleteMany({ where: { email } });
-
-        // Store the new hashed OTP record
+        // FIX: lowercase authotp
+        await prisma.authotp.deleteMany({ where: { email: cleanEmail } });
         await prisma.authotp.create({
-            data: {
-                email,
-                otp_hash: otpHash,
-                expires_at: expiresAt
-            }
+            data: { email: cleanEmail, otp_hash: otpHash, expires_at: expiresAt }
         });
 
-        // Mock Email Delivery (To be replaced with a mailing service later)
-        console.log(`\n[MOCK EMAIL DELIVERY] To: ${email} | OTP: ${rawOtp}\n`);
-
-        return res.status(200).json({ 
-            status: 'success', 
-            message: 'OTP generated and sent successfully' 
-        });
-    } catch (error) {
-        next(error);
-    }
+        console.log(`\n[MOCK EMAIL DELIVERY] To: ${cleanEmail} | OTP: ${rawOtp}\n`);
+        return res.status(200).json({ status: 'success', message: 'OTP generated' });
+    } catch (error) { next(error); }
 };
 
 exports.verifyOtp = async (req, res, next) => {
     try {
         const { email, otp } = req.body;
-        if (!email || !otp) {
-            return res.status(400).json({ status: 'error', message: 'Email and OTP are required' });
-        }
+        if (!email || !otp) return res.status(400).json({ status: 'error', message: 'Email and OTP required' });
 
-        // Find the latest OTP record for this email
+        const cleanEmail = email.trim().toLowerCase();
+
+        // FIX: lowercase authotp
         const otpRecord = await prisma.authotp.findFirst({
-            where: { email },
+            where: { email: cleanEmail },
             orderBy: { created_at: 'desc' }
         });
 
-        if (!otpRecord) {
-            return res.status(401).json({ status: 'error', message: 'No pending OTP found for this email' });
+        if (!otpRecord) return res.status(401).json({ status: 'error', message: 'No pending OTP' });
+
+        if (otpRecord.attempts_count >= 5) {
+            await prisma.authotp.delete({ where: { id: otpRecord.id } });
+            return res.status(429).json({ status: 'error', message: 'Too many failed attempts.' });
         }
 
-        // Enforce expiration
         if (new Date() > otpRecord.expires_at) {
             await prisma.authotp.delete({ where: { id: otpRecord.id } });
-            return res.status(401).json({ status: 'error', message: 'OTP has expired. Please request a new one.' });
+            return res.status(401).json({ status: 'error', message: 'OTP expired' });
         }
 
-        // Verify the provided OTP against the Argon2 hash
-        const isValid = await argon2.verify(otpRecord.otp_hash, otp);
+        const isValid = await argon2.verify(otpRecord.otp_hash, otp.toString().trim());
         if (!isValid) {
             await prisma.authotp.update({
                 where: { id: otpRecord.id },
@@ -77,55 +87,78 @@ exports.verifyOtp = async (req, res, next) => {
             return res.status(401).json({ status: 'error', message: 'Invalid OTP' });
         }
 
-        // OTP is valid. Delete the record to prevent reuse
         await prisma.authotp.delete({ where: { id: otpRecord.id } });
 
-        // Find the useraccount, or create a new one if it is their first time logging in
-        let user = await prisma.useraccount.findUnique({ where: { email } });
-        if (!user) {
-            user = await prisma.useraccount.create({
-                data: { email }
-            });
-        }
+        let user = await prisma.useraccount.findUnique({ where: { email: cleanEmail } });
+        if (!user) user = await prisma.useraccount.create({ data: { email: cleanEmail } });
 
-        // Generate the JWT 
-        const token = jwt.sign(
-            { userId: user.id, email: user.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        return res.status(200).json({ 
-            status: 'success', 
-            message: 'Authentication successful',
-            token,
-            user 
-        });
-    } catch (error) {
-        next(error);
-    }
+        const roles = await getUserRoles(user.id);
+        const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const refreshToken = await generateRefreshToken(user.id);
+        
+        return res.status(200).json({ status: 'success', token, refresh_token: refreshToken, user: { ...user, roles } });
+    } catch (error) { next(error); }
 };
 
 exports.getMe = async (req, res, next) => {
     try {
-        const user = await prisma.userAccount.findUnique({
+        const user = await prisma.useraccount.findUnique({
             where: { id: req.user.userId },
-            select: {
-                id: true,
-                email: true,
-                phone_number: true,
-                preferred_language: true,
-                status: true,
-                created_at: true
-            }
+            select: { id: true, email: true, phone_number: true, preferred_language: true, status: true, created_at: true }
+        });
+        if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+        const roles = await getUserRoles(user.id);
+        return res.status(200).json({ status: 'success', data: { ...user, roles } });
+    } catch (error) { next(error); }
+};
+
+exports.refreshToken = async (req, res, next) => {
+    try {
+        const { refresh_token } = req.body;
+        if (!refresh_token) return res.status(401).json({ status: 'error', message: 'Refresh token required' });
+
+        const [userId, rawString] = refresh_token.split('.');
+        if (!userId || !rawString) return res.status(401).json({ status: 'error', message: 'Invalid format' });
+
+        const tokens = await prisma.refreshtoken.findMany({
+            where: { user_id: userId, revoked: false, expires_at: { gt: new Date() } }
         });
 
-        if (!user) {
-            return res.status(404).json({ status: 'error', message: 'User not found' });
+        let validDbToken = null;
+        for (const t of tokens) {
+            if (await argon2.verify(t.token_hash, rawString)) {
+                validDbToken = t;
+                break;
+            }
         }
 
-        return res.status(200).json({ status: 'success', data: user });
-    } catch (error) {
-        next(error);
-    }
+        if (!validDbToken) return res.status(401).json({ status: 'error', message: 'Invalid or expired refresh token.' });
+
+        await prisma.refreshtoken.update({ where: { id: validDbToken.id }, data: { revoked: true } });
+        const user = await prisma.useraccount.findUnique({ where: { id: userId } });
+        
+        const newAccessToken = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const newRefreshToken = await generateRefreshToken(user.id);
+
+        return res.status(200).json({ status: 'success', token: newAccessToken, refresh_token: newRefreshToken });
+    } catch (error) { next(error); }
+};
+
+exports.logout = async (req, res, next) => {
+    try {
+        const { refresh_token } = req.body;
+        if (refresh_token) {
+            const [userId, rawString] = refresh_token.split('.');
+            if (userId && rawString) {
+                const tokens = await prisma.refreshtoken.findMany({ where: { user_id: userId, revoked: false } });
+                for (const t of tokens) {
+                    if (await argon2.verify(t.token_hash, rawString)) {
+                        await prisma.refreshtoken.update({ where: { id: t.id }, data: { revoked: true } });
+                        break;
+                    }
+                }
+            }
+        }
+        return res.status(200).json({ status: 'success', message: 'Logged out successfully' });
+    } catch (error) { next(error); }
 };

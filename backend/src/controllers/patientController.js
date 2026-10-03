@@ -2,26 +2,35 @@ const prisma = require('../config/db');
 
 exports.createPatientProfile = async (req, res, next) => {
     try {
+        // Added relationship fields to support Delegate creation
         const { 
-            full_name, 
-            date_of_birth, 
-            preferred_language = 'en', 
-            cancer_type, 
-            cancer_stage, 
-            diagnosis_date,
-            care_plan_summary 
+            full_name, date_of_birth, preferred_language = 'en', cancer_type, 
+            cancer_stage, diagnosis_date, care_plan_summary, 
+            relationship_type = 'SELF', relationship_label = 'Self' 
         } = req.body;
         
         const userId = req.user.userId;
 
         if (!full_name || !date_of_birth) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'full_name and date_of_birth are required fields.'
-            });
+            return res.status(400).json({ status: 'error', message: 'full_name and date_of_birth are required.' });
         }
 
-        // Atomic transaction: create patient and self-link simultaneously
+        // B9 Fix: Only enforce the "one profile limit" if they are registering as SELF
+        if (relationship_type === 'SELF') {
+            const existingLink = await prisma.patientaccountlink.findFirst({
+                where: { user_id: userId, relationship_type: 'SELF' },
+                include: { patient: true }
+            });
+
+            if (existingLink) {
+                return res.status(409).json({ 
+                    status: 'error', 
+                    message: 'A SELF patient profile already exists for this account.',
+                    data: { patient: existingLink.patient, link: existingLink }
+                });
+            }
+        }
+
         const result = await prisma.$transaction(async (tx) => {
             const newPatient = await tx.patient.create({
                 data: {
@@ -39,22 +48,17 @@ exports.createPatientProfile = async (req, res, next) => {
                 data: {
                     user_id: userId,
                     patient_id: newPatient.id,
-                    relationship_type: 'SELF',
-                    relationship_label: 'Self',
+                    relationship_type: relationship_type, // SELF or DELEGATE
+                    relationship_label: relationship_label,
                     access_scopes: ['ALL'],
                     consent_status: 'GRANTED',
                     granted_by: userId
                 }
             });
-
             return { patient: newPatient, link };
         });
 
-        return res.status(201).json({
-            status: 'success',
-            message: 'Patient profile established and linked successfully.',
-            data: result
-        });
+        return res.status(201).json({ status: 'success', data: result });
     } catch (error) {
         next(error);
     }
@@ -64,7 +68,6 @@ exports.getMyPatients = async (req, res, next) => {
     try {
         const userId = req.user.userId;
 
-        // Fetch all patients linked to the authenticated user account
         const links = await prisma.patientaccountlink.findMany({
             where: { 
                 user_id: userId,

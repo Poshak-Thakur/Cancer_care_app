@@ -2,20 +2,15 @@ const express = require('express');
 const multer = require('multer');
 const documentController = require('../controllers/documentController');
 const authMiddleware = require('../middleware/authMiddleware');
+const requirePatientAccess = require('../middleware/rbacMiddleware');
 
 const router = express.Router();
-
-// Store files in memory buffer before pushing to Supabase Storage
-const upload = multer({ 
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-});
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 router.use(authMiddleware);
 
-// Notice `upload.single('file')` intercepts the file data
-router.post('/', upload.single('file'), documentController.uploadDocument);
-router.get('/patient/:patient_id', documentController.getPatientDocuments);
-router.patch('/:id/verify', documentController.verifyDocument);
+router.post('/', upload.single('file'), requirePatientAccess(), documentController.uploadDocument);
+router.get('/patient/:patient_id', requirePatientAccess(), documentController.getPatientDocuments);
+router.patch('/:id/verify', documentController.verifyDocument); 
 
 module.exports = router;

@@ -1,61 +1,75 @@
 const prisma = require('../config/db');
 const crypto = require('crypto');
-
-// Helper to enforce Role-Based Access Control
-const verifyAccess = async (userId, patientId) => {
-    return await prisma.patientaccountlink.findFirst({
-        where: { user_id: userId, patient_id: patientId, consent_status: 'GRANTED' }
-    });
-};
+const { verifyPatientDataEventAccess } = require('../services/authorizationService');
 
 exports.submitCheckIn = async (req, res, next) => {
     try {
-        const { patient_id, overall_feeling, observations } = req.body; 
+        const { patient_id, observations, source = 'ROUTINE', client_event_id } = req.body;
         const userId = req.user.userId;
 
-        if (!await verifyAccess(userId, patient_id)) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access.' });
+        if (!patient_id) {
+            return res.status(400).json({ status: 'error', message: 'patient_id is required.' });
         }
 
-        // 1. Create the parent event (The Check-in)
-        const symptomEvent = await prisma.symptomevent.create({
-            data: {
-                patient_id: patient_id,
-                recorded_by: userId,
-                source: 'ROUTINE',
-                client_event_id: crypto.randomUUID(),
-                // 2. Map the array of observations (e.g., mood, nausea, pain) to the nested table
-                symptomobservation: {
-                    create: observations.map(obs => ({
-                        observation_type: obs.observation_type, // e.g., 'MOOD', 'NAUSEA'
-                        severity: obs.severity,                 // 1-10 scale
-                        note: obs.note || null
-                    }))
+        if (!Array.isArray(observations) || observations.length === 0) {
+            return res.status(400).json({ status: 'error', message: 'At least one symptom observation is required.' });
+        }
+
+        // Validate observation types and severity range
+        for (const obs of observations) {
+            if (!obs.observation_type || typeof obs.observation_type !== 'string') {
+                return res.status(400).json({ status: 'error', message: 'Each observation must include an observation_type string.' });
+            }
+            if (obs.severity !== undefined && obs.severity !== null) {
+                const sev = Number(obs.severity);
+                if (isNaN(sev) || sev < 0 || sev > 10) {
+                    return res.status(400).json({ status: 'error', message: 'Observation severity must be a numeric value between 0 and 10.' });
                 }
-            },
-            include: { symptomobservation: true }
+            }
+        }
+
+        const hasAccess = await verifyPatientDataEventAccess(userId, patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
+        }
+
+        const eventId = crypto.randomUUID();
+        const eventUuid = client_event_id || crypto.randomUUID();
+
+        const symptomEvent = await prisma.$transaction(async (tx) => {
+            const event = await tx.symptomevent.create({
+                data: {
+                    id: eventId,
+                    patient_id,
+                    recorded_by: userId,
+                    source: ['ROUTINE', 'UPDATE'].includes(source) ? source : 'ROUTINE',
+                    client_event_id: eventUuid,
+                    sync_state: 'SYNCED',
+                    recorded_at: new Date()
+                }
+            });
+
+            const observationData = observations.map(obs => ({
+                symptom_event_id: event.id,
+                observation_type: obs.observation_type,
+                severity: obs.severity !== undefined && obs.severity !== null ? Number(obs.severity) : null,
+                numeric_value: obs.numeric_value !== undefined && obs.numeric_value !== null ? obs.numeric_value : null,
+                unit: obs.unit || null,
+                note: obs.note || null
+            }));
+
+            await tx.symptomobservation.createMany({
+                data: observationData
+            });
+
+            return event;
         });
 
-        // 3. Mark the "Daily Check-in" care event as completed if one was scheduled for today
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        
-        await prisma.careevent.updateMany({
-            where: {
-                patient_id: patient_id,
-                type: 'OTHER', // Assuming "Check-in" is stored as an OTHER task
-                schedule_time: { gte: startOfDay },
-                completion_status: 'SCHEDULED'
-            },
-            data: {
-                completion_status: 'COMPLETED',
-                completed_at: new Date()
-            }
-        });
+        // Unintended side effect of completing care events has been removed
 
         return res.status(201).json({
             status: 'success',
-            message: 'Check-in completed successfully',
+            message: 'Check-in recorded safely.',
             data: symptomEvent
         });
     } catch (error) {
@@ -68,14 +82,18 @@ exports.getTodayCheckInStatus = async (req, res, next) => {
         const { patient_id } = req.params;
         const userId = req.user.userId;
 
-        if (!await verifyAccess(userId, patient_id)) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized access.' });
+        if (!patient_id) {
+            return res.status(400).json({ status: 'error', message: 'patient_id is required.' });
+        }
+
+        const hasAccess = await verifyPatientDataEventAccess(userId, patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
         }
 
         const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
+        startOfDay.setUTCHours(0, 0, 0, 0);
 
-        // Fetch the most recent check-in for today to populate the "I'm okay" UI card
         const todayCheckIn = await prisma.symptomevent.findFirst({
             where: {
                 patient_id: patient_id,
@@ -89,6 +107,33 @@ exports.getTodayCheckInStatus = async (req, res, next) => {
             status: 'success', 
             data: todayCheckIn ? { completed: true, details: todayCheckIn } : { completed: false }
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getSymptomHistory = async (req, res, next) => {
+    try {
+        const { patient_id } = req.params;
+        const userId = req.user.userId;
+
+        if (!patient_id) {
+            return res.status(400).json({ status: 'error', message: 'patient_id is required.' });
+        }
+
+        const hasAccess = await verifyPatientDataEventAccess(userId, patient_id);
+        if (!hasAccess) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
+        }
+
+        const history = await prisma.symptomevent.findMany({
+            where: { patient_id },
+            include: { symptomobservation: true },
+            orderBy: { recorded_at: 'desc' },
+            take: 30
+        });
+
+        return res.status(200).json({ status: 'success', data: history });
     } catch (error) {
         next(error);
     }
