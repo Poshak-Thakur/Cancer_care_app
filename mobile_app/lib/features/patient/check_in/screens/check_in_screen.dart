@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../../../core/localization/lang.dart';
 import '../../../../core/localization/strings.dart';
+import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/buttons.dart';
+import '../../../auth/services/auth_state.dart';
+import '../services/check_in_service.dart';
 
 class CheckInScreen extends StatefulWidget {
   const CheckInScreen({super.key});
@@ -13,17 +16,40 @@ class CheckInScreen extends StatefulWidget {
 
 class _CheckInScreenState extends State<CheckInScreen> {
   final Map<String, int?> _selected = {'pain': null, 'fatigue': null, 'appetite': null, 'mood': null};
+  bool _saving = false;
   bool _saved = false;
-  bool _synced = false;
+  String? _error;
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving || _saved) return;
+    final observations = CheckInService.observationsFromSelections(_selected);
+    if (observations.isEmpty) {
+      setState(() => _error = S.t('pickOne'));
+      return;
+    }
+    final pid = AuthState.patientId;
+    if (pid == null) {
+      setState(() => _error = S.t('couldNotSave'));
+      return;
+    }
     setState(() {
-      _saved = true;
-      _synced = false;
+      _saving = true;
+      _error = null;
     });
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _synced = true);
-    });
+    try {
+      await CheckInService().submit(patientId: pid, observations: observations);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _saved = true;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = S.t('couldNotSave');
+      });
+    }
   }
 
   Widget _symptomBlock(String key, IconData icon, List<String> levelKeys) {
@@ -47,7 +73,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 child: Padding(
                   padding: EdgeInsets.only(right: i == 3 ? 0 : 8),
                   child: InkWell(
-                    onTap: () => setState(() => _selected[key] = i),
+                    onTap: _saved ? null : () => setState(() {
+                      _selected[key] = i;
+                      _error = null;
+                    }),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
@@ -100,9 +129,19 @@ class _CheckInScreenState extends State<CheckInScreen> {
                 _symptomBlock('fatigue', Icons.battery_2_bar, ['none', 'aLittle', 'aLot', 'exhausted']),
                 _symptomBlock('appetite', Icons.restaurant, ['good', 'okay', 'low', 'none']),
                 _symptomBlock('mood', Icons.sentiment_satisfied_alt, ['good', 'okay', 'low', 'veryLow']),
-                PrimaryButton(label: S.t('saveCheckin'), onPressed: _save),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13.5, color: AppColors.warning))),
+                      ],
+                    ),
+                  ),
                 if (_saved) ...[
-                  const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(14)),
@@ -111,19 +150,33 @@ class _CheckInScreenState extends State<CheckInScreen> {
                         Container(
                           width: 8,
                           height: 8,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: _synced ? AppColors.positive : AppColors.warning),
+                          decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.positive),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            _synced ? S.t('syncedMsg') : S.t('savedWaiting'),
+                            S.t('syncedMsg'),
                             style: const TextStyle(fontSize: 14, color: AppColors.primaryDeep, fontWeight: FontWeight.w500),
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
+                  const SizedBox(height: 12),
+                  SecondaryButton(label: S.t('doneBtn'), onPressed: () => Navigator.of(context).pop()),
+                ] else if (_saving)
+                  const SizedBox(
+                    height: 52,
+                    child: Center(
+                      child: SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary),
+                      ),
+                    ),
+                  )
+                else
+                  PrimaryButton(label: S.t('saveCheckin'), onPressed: _save),
               ],
             ),
           ),

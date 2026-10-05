@@ -1,16 +1,17 @@
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
+import '../models/medical_document.dart';
 
 /// Backend limit: 10 MB per file, multipart field name 'file'.
 class DocumentService {
   final ApiClient _api = ApiClient.instance;
 
-  Future<List<Map<String, dynamic>>> list(String patientId) async {
+  Future<List<MedicalDocument>> list(String patientId) async {
     final res = await _api.get(ApiEndpoints.patientDocuments(patientId));
-    return (res['data'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return (res['data'] as List).map((e) => MedicalDocument.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<Map<String, dynamic>> upload({
+  Future<MedicalDocument> upload({
     required String patientId,
     required List<int> bytes,
     required String filename,
@@ -29,15 +30,15 @@ class DocumentService {
       fileBytes: bytes,
       filename: filename,
     );
-    return Map<String, dynamic>.from(res['data'] as Map);
+    return MedicalDocument.fromJson(res['data'] as Map<String, dynamic>);
   }
 
   /// [status]: VERIFIED | REJECTED
-  Future<Map<String, dynamic>> verify(String documentId, String status) async {
+  Future<MedicalDocument> verify(String documentId, String status) async {
     final res = await _api.patch(
       ApiEndpoints.verifyDocument(documentId),
       body: {'verification_status': status},
     );
-    return Map<String, dynamic>.from(res['data'] as Map);
+    return MedicalDocument.fromJson(res['data'] as Map<String, dynamic>);
   }
 }

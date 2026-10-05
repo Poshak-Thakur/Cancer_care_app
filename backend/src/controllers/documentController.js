@@ -45,6 +45,11 @@ exports.verifyDocument = async (req, res, next) => {
         const { verification_status } = req.body;
         const userId = req.user.userId;
 
+        const VALID_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED'];
+        if (!VALID_STATUSES.includes(verification_status)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid verification status.' });
+        }
+
         const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
         if (!isStaff) return res.status(403).json({ status: 'error', message: 'Only authorized NGO staff can verify documents.' });
 

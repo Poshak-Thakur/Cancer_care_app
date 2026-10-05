@@ -6,7 +6,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../auth/screens/login_screen.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/buttons.dart';
+import '../../../../core/widgets/info_row.dart';
 import '../../../../core/widgets/saathi_card.dart';
+import 'invite_caregiver_screen.dart';
 import '../../../../core/widgets/section_label.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -60,22 +62,12 @@ class ProfileScreen extends StatelessWidget {
 
             SectionLabel(S.t('linkedCaregiver')),
             SaathiCard(
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 19,
-                    backgroundColor: AppColors.primaryLight,
-                    child: Text('N', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryDeep)),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Nikhil Kulkarni', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5)),
-                      Text(S.t('sonFullAccess'), style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ],
+              onTap: () => AppRoutes.push(context, const InviteCaregiverScreen()),
+              child: InfoRow(
+                icon: Icons.person_add_alt_1_outlined,
+                title: S.t('inviteCaregiver'),
+                subtitle: S.t('inviteCaregiverSub'),
+                trailing: const Icon(Icons.chevron_right, color: AppColors.primary),
               ),
             ),
             const SizedBox(height: 6),
@@ -115,7 +107,8 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
     if (ok == true && context.mounted) {
-      AuthState.signOut();
+      await AuthState.signOut();
+      if (!context.mounted) return;
       AppRoutes.pushAndClear(context, const LoginScreen());
     }
   }

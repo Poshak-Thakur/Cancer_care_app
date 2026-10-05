@@ -5,7 +5,7 @@ import '../../../core/localization/strings.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/dragonfly_mark.dart';
-import 'login_screen.dart';
+import 'session_gate_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -24,7 +24,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _fade = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..forward();
     _timer = Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
-      AppRoutes.fadeReplace(context, const LoginScreen());
+      AppRoutes.fadeReplace(context, const SessionGateScreen());
     });
   }
 

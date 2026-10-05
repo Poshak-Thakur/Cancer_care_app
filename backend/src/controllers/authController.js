@@ -2,13 +2,13 @@ const prisma = require('../config/db');
 const argon2 = require('argon2');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const transporter = require('../config/mailer');
 
 const getUserRoles = async (userId) => {
     const roles = [];
     const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
     if (isStaff) roles.push('STAFF');
 
-    // FIX: Include DELEGATE accounts
     const isPatient = await prisma.patientaccountlink.findFirst({ 
         where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] } } 
     });
@@ -42,13 +42,24 @@ exports.requestOtp = async (req, res, next) => {
         const otpHash = await argon2.hash(rawOtp);
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        // FIX: lowercase authotp
         await prisma.authotp.deleteMany({ where: { email: cleanEmail } });
         await prisma.authotp.create({
             data: { email: cleanEmail, otp_hash: otpHash, expires_at: expiresAt }
         });
 
-        console.log(`\n[MOCK EMAIL DELIVERY] To: ${cleanEmail} | OTP: ${rawOtp}\n`);
+        try {
+            await transporter.sendMail({
+                from: `"Saathi App" <${process.env.SMTP_USER}>`,
+                to: cleanEmail,
+                subject: 'Your Saathi App Login Code',
+                text: `Your OTP code is: ${rawOtp}\n\nIt will expire in 10 minutes.`
+            });
+            console.log(`[EMAIL SENT] OTP sent to ${cleanEmail}`);
+        } catch (err) {
+            console.error('[EMAIL ERROR] Failed to send OTP email:', err);
+            console.log(`\n[MOCK FALLBACK] To: ${cleanEmail} | OTP: ${rawOtp}\n`);
+        }
+        
         return res.status(200).json({ status: 'success', message: 'OTP generated' });
     } catch (error) { next(error); }
 };
@@ -60,7 +71,6 @@ exports.verifyOtp = async (req, res, next) => {
 
         const cleanEmail = email.trim().toLowerCase();
 
-        // FIX: lowercase authotp
         const otpRecord = await prisma.authotp.findFirst({
             where: { email: cleanEmail },
             orderBy: { created_at: 'desc' }
@@ -160,5 +170,21 @@ exports.logout = async (req, res, next) => {
             }
         }
         return res.status(200).json({ status: 'success', message: 'Logged out successfully' });
+    } catch (error) { next(error); }
+};
+
+exports.updateFcmToken = async (req, res, next) => {
+    try {
+        const { fcm_token } = req.body;
+        const userId = req.user.userId;
+
+        if (!fcm_token) return res.status(400).json({ status: 'error', message: 'fcm_token is required.' });
+
+        await prisma.useraccount.update({
+            where: { id: userId },
+            data: { fcm_token }
+        });
+
+        return res.status(200).json({ status: 'success', message: 'FCM token registered successfully.' });
     } catch (error) { next(error); }
 };

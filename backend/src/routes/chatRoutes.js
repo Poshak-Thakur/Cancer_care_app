@@ -1,23 +1,17 @@
 const express = require('express');
+const router = express.Router();
 const chatController = require('../controllers/chatController');
 const authMiddleware = require('../middleware/authMiddleware');
-const requirePatientAccess = require('../middleware/rbacMiddleware');
+const multer = require('multer');
 
-const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(authMiddleware);
 
-// NEW: Get the directory of everyone the patient can chat/call with
-router.get('/contacts/:patient_id', requirePatientAccess(), chatController.getCareTeamContacts);
-
-// NEW: Create or open a specific chat thread
-router.post('/thread', requirePatientAccess(), chatController.getOrCreateConversation);
-
-// EXISTING: View conversation list[cite: 26]
-router.get('/patient/:patient_id', requirePatientAccess(), chatController.getConversations);
-
-// EXISTING: Message-level endpoints[cite: 26]
-router.get('/:conversation_id', chatController.getMessages);
+router.get('/contacts/:patient_id', chatController.getContacts);
+router.post('/threads', chatController.openThread);
+router.get('/messages/:conversation_id', chatController.getMessages);
 router.post('/send', chatController.sendMessage);
+router.post('/upload-audio', upload.single('audio'), chatController.uploadAudio);
 
 module.exports = router;

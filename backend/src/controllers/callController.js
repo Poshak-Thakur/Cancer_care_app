@@ -2,6 +2,7 @@ const prisma = require('../config/db');
 const crypto = require('crypto');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
 const { verifyCommunicationAccess } = require('../services/authorizationService');
+const { sendCallPushNotification } = require('../config/firebase');
 
 const VALID_CALL_TYPES = ['AUDIO', 'VIDEO'];
 
@@ -43,15 +44,46 @@ exports.initiateCall = async (req, res, next) => {
             }
         });
 
+        // Determine Caller Display Name
+        let callerName = "Saathi User";
+        const patientLink = await prisma.patientaccountlink.findFirst({ where: { user_id: callerId }, include: { patient: true } });
+        if (patientLink?.patient?.full_name) {
+            callerName = patientLink.patient.full_name;
+        } else {
+            const staffLink = await prisma.staffassignment.findFirst({ where: { staff_user_id: callerId } });
+            if (staffLink) {
+                callerName = "NGO Counsellor";
+            } else {
+                const careLink = await prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: callerId } });
+                if (careLink) callerName = careLink.relationship_label || "Caregiver";
+            }
+        }
+
+        // 1. In-app Socket.io ring
         const io = req.app.get('io');
         if (io) {
             io.to(receiver_id).emit('incomingCall', {
                 call_id: callSession.id,
                 caller_id: callerId,
+                caller_name: callerName,
                 call_type,
                 channelName,
                 token,
                 appId 
+            });
+        }
+
+        // 2. High-priority Call Push (Wakes up closed or backgrounded app)
+        const receiver = await prisma.useraccount.findUnique({ where: { id: receiver_id } });
+        if (receiver && receiver.fcm_token) {
+            await sendCallPushNotification(receiver.fcm_token, {
+                call_id: callSession.id,
+                caller_id: callerId,
+                caller_name: callerName,
+                call_type,
+                channelName,
+                token,
+                appId
             });
         }
 
@@ -81,6 +113,11 @@ exports.updateCallStatus = async (req, res, next) => {
         const { status } = req.body; 
         const userId = req.user.userId;
 
+        const VALID_STATUSES = ['ONGOING', 'COMPLETED', 'MISSED', 'REJECTED'];
+        if (!VALID_STATUSES.includes(status)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid call status.' });
+        }
+
         const call = await prisma.callsession.findUnique({ where: { id } });
         if (!call) return res.status(404).json({ status: 'error', message: 'Call not found' });
 
@@ -88,7 +125,10 @@ exports.updateCallStatus = async (req, res, next) => {
             return res.status(403).json({ status: 'error', message: 'Unauthorized access to this call.' });
         }
 
-        // Strict Transition Authorization
+        if (['COMPLETED', 'MISSED', 'REJECTED'].includes(call.status)) {
+            return res.status(400).json({ status: 'error', message: 'Call has already ended.' });
+        }
+
         if (['ONGOING', 'REJECTED'].includes(status) && userId !== call.receiver_id) {
             return res.status(403).json({ status: 'error', message: 'Only the receiver can accept or reject an incoming call.' });
         }

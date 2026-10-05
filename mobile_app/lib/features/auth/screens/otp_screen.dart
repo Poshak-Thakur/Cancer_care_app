@@ -6,11 +6,10 @@ import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_state.dart';
-import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/lang_toggle.dart';
-import 'session_gate_screen.dart';
+import '../services/session_router.dart';
 
 class OtpScreen extends StatefulWidget {
   const OtpScreen({super.key});
@@ -27,9 +26,9 @@ class _OtpScreenState extends State<OtpScreen> {
   final _focus = FocusNode();
   Timer? _timer;
   int _secondsLeft = _resendSeconds;
+  String? _error;
   bool _verifying = false;
-  bool _resending = false;
-  String? _error; // localized message shown under the code boxes
+  bool _verified = false; // OTP accepted and JWT stored; only the patient lookup may need a retry
 
   @override
   void initState() {
@@ -62,23 +61,19 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _resend() async {
-    if (_resending) return;
-    setState(() {
-      _resending = true;
-      _error = null;
-    });
     try {
       await AuthApiService().requestOtp(AuthState.email);
+    } on ApiException catch (e) {
       if (!mounted) return;
-      _controller.clear();
-      _startTimer();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.t('codeSent'))));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = AuthState.describe(e, S.t('genericError')));
-    } finally {
-      if (mounted) setState(() => _resending = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
     }
+    if (!mounted) return;
+    _controller.clear();
+    _verified = false;
+    setState(() => _error = null);
+    _startTimer();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.t('codeSent'))));
   }
 
   Future<void> _verify() async {
@@ -89,27 +84,24 @@ class _OtpScreenState extends State<OtpScreen> {
       _error = null;
     });
     try {
-      final user = await AuthApiService().verifyOtp(email: AuthState.email, otp: _controller.text);
+      if (!_verified) {
+        final result = await AuthApiService().verifyOtp(email: AuthState.email, otp: _controller.text);
+        AuthState.applyLogin(result);
+        _verified = true;
+      }
       if (!mounted) return;
-      AuthState.userId = user['id']?.toString();
-      // Find this user's patient (or send them to onboarding) on the next screen,
-      // which also offers "Try again" if the server can't be reached.
-      AppRoutes.pushAndClear(context, const SessionGateScreen());
-    } catch (e) {
+      await SessionRouter.go(context);
+    } on ApiException catch (e) {
       if (!mounted) return;
-      final api = e is ApiException ? e : null;
-      final wrongCode = api?.isUnauthorized ?? false;
-      final expired = wrongCode && api!.message.toLowerCase().contains('expired');
+      final wrongCode = !_verified && e.statusCode == 401 && e.message == 'Invalid OTP';
       setState(() {
         _verifying = false;
-        _error = expired
-            ? S.t('otpExpired')
-            : wrongCode
-                ? S.t('otpWrong')
-                : AuthState.describe(e, S.t('genericError'));
+        _error = wrongCode ? S.t('otpWrong') : e.message;
       });
-      _controller.clear();
-      _focus.requestFocus();
+      if (!_verified) {
+        _controller.clear();
+        _focus.requestFocus();
+      }
     }
   }
 
@@ -140,11 +132,8 @@ class _OtpScreenState extends State<OtpScreen> {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Flexible(
-                      child: Text(AuthState.email,
-                        overflow: TextOverflow.ellipsis,
+                    Text(AuthState.maskedEmail,
                         style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold, color: AppColors.ink)),
-                    ),
                     const SizedBox(width: 4),
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(),
@@ -163,7 +152,6 @@ class _OtpScreenState extends State<OtpScreen> {
                       children: List.generate(_length, (i) {
                         final filled = i < code.length;
                         final active = i == code.length && !_verifying;
-                        final wrong = _error != null;
                         return Container(
                           width: 46,
                           height: 58,
@@ -172,10 +160,10 @@ class _OtpScreenState extends State<OtpScreen> {
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: wrong
+                              color: _error != null
                                   ? AppColors.warning
                                   : (active ? AppColors.primary : AppColors.ink.withOpacity(0.12)),
-                              width: active || wrong ? 1.8 : 1.2,
+                              width: active || _error != null ? 1.8 : 1.2,
                             ),
                           ),
                           child: Text(filled ? code[i] : '',
@@ -237,27 +225,10 @@ class _OtpScreenState extends State<OtpScreen> {
                   child: _secondsLeft > 0
                       ? Text(_timerLabel, style: const TextStyle(fontSize: 14, color: AppColors.textFaint))
                       : TextButton(
-                          onPressed: _resending ? null : _resend,
+                          onPressed: _resend,
                           child: Text(S.t('resendNow'),
                               style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 15)),
                         ),
-                ),
-                const SizedBox(height: 18),
-                if (AuthState.showDevBanner)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(12)),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.science_outlined, size: 18, color: AppColors.roseText),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(S.t('demoBanner'),
-                            style: const TextStyle(fontSize: 12.5, color: AppColors.roseText, height: 1.4)),
-                      ),
-                    ],
-                  ),
                 ),
               ],
             ),

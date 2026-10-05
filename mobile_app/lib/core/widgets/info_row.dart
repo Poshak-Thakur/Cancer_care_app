@@ -5,7 +5,7 @@ import 'card_icon_box.dart';
 class InfoRow extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final bool rose;
   final Widget? trailing;
 
@@ -13,7 +13,7 @@ class InfoRow extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.rose = false,
     this.trailing,
   });
@@ -32,11 +32,13 @@ class InfoRow extends StatelessWidget {
                 title,
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5, color: AppColors.ink),
               ),
-              const SizedBox(height: 1),
-              Text(
-                subtitle,
-                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 1),
+                Text(
+                  subtitle!,
+                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                ),
+              ],
             ],
           ),
         ),

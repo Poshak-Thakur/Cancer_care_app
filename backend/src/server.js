@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const app = require('./app');
+const { initChatCleanupJob } = require('./jobs/chatCleanup');
 
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
@@ -40,6 +41,8 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
     console.log(`Saathi API is running on port ${PORT}`);
+    // Start ephemeral message and audio cleanup schedule
+    initChatCleanupJob();
 });
 
 process.on('unhandledRejection', (err) => {

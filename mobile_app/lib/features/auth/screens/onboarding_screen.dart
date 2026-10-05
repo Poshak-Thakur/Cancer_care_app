@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
+import '../../../core/network/api_exception.dart';
+import '../../../core/realtime/socket_service.dart';
+import '../../patient/profile/services/patient_service.dart';
 import '../services/auth_state.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
@@ -20,6 +23,8 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _name = TextEditingController();
   DateTime? _dob;
+  bool _saving = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -47,26 +52,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (picked != null) setState(() => _dob = picked);
   }
 
-  bool _saving = false;
-
   Future<void> _finish() async {
     if (!_ready || _saving) return;
     FocusScope.of(context).unfocus();
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
-      await AuthState.createPatient(
-        name: _name.text,
-        dob: _dob!,
-        languageCode: Lang.isHindi.value ? 'hi' : 'en',
+      final patient = await PatientService().createProfile(
+        fullName: _name.text.trim(),
+        dateOfBirth: _dob!,
+        preferredLanguage: Lang.isHindi.value ? 'hi' : 'en',
       );
       if (!mounted) return;
+      AuthState.setPatient(patient);
+      AuthState.roles = const ['PATIENT'];
+      SocketService.instance.start(AuthState.userId);
       AppRoutes.pushAndClear(context, const PatientShell());
-    } catch (e) {
+    } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AuthState.describe(e, S.t('genericError')))),
-      );
+      setState(() {
+        _saving = false;
+        _error = e.message.isEmpty ? S.t('couldNotCreateProfile') : e.message;
+      });
     }
   }
 
@@ -165,6 +174,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 const SizedBox(height: 24),
 
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                      ],
+                    ),
+                  ),
                 _saving
                     ? const SizedBox(
                         height: 52,

@@ -4,6 +4,15 @@ import '../../../../core/localization/strings.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/buttons.dart';
 
+/// Result popped by the sheet.
+class ComposeResult {
+  final String content;
+  final String visibility; // PUBLIC | PRIVATE
+  const ComposeResult(this.content, this.visibility);
+}
+
+/// Write a post. Private entries show a safety disclaimer before submitting:
+/// they are hidden from the community but visible to the assigned counsellor.
 class ComposeSheet extends StatefulWidget {
   const ComposeSheet({super.key});
 
@@ -12,8 +21,8 @@ class ComposeSheet extends StatefulWidget {
 }
 
 class _ComposeSheetState extends State<ComposeSheet> {
-  String? _type;
   final _controller = TextEditingController();
+  String _visibility = 'PUBLIC';
 
   @override
   void dispose() {
@@ -26,90 +35,78 @@ class _ComposeSheetState extends State<ComposeSheet> {
     return ValueListenableBuilder<bool>(
       valueListenable: Lang.isHindi,
       builder: (context, _, __) {
+        final private = _visibility == 'PRIVATE';
         return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 22,
-            bottom: 22 + MediaQuery.of(context).viewInsets.bottom,
+          padding: EdgeInsets.only(left: 20, right: 20, top: 22, bottom: 22 + MediaQuery.of(context).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(S.t('composeTitle'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                const SizedBox(height: 12),
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(value: 'PUBLIC', icon: const Icon(Icons.groups_outlined, size: 18), label: Text(S.t('visPublic'))),
+                    ButtonSegment(value: 'PRIVATE', icon: const Icon(Icons.lock_outline, size: 18), label: Text(S.t('visPrivate'))),
+                  ],
+                  selected: {_visibility},
+                  onSelectionChanged: (v) => setState(() => _visibility = v.first),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  private ? S.t('visPrivateSub') : S.t('visPublicSub'),
+                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _controller,
+                  minLines: 4,
+                  maxLines: 6,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: private ? S.t('journalPlaceholder') : S.t('composePlaceholder'),
+                    filled: true,
+                    fillColor: AppColors.bg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
+                ),
+                if (private) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.shield_outlined, size: 18, color: AppColors.primaryDeep),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(S.t('privateDisclaimer'),
+                              style: const TextStyle(fontSize: 13, color: AppColors.primaryDeep, height: 1.4, fontWeight: FontWeight.w500)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                Opacity(
+                  opacity: _controller.text.trim().isEmpty ? 0.5 : 1,
+                  child: PrimaryButton(
+                    label: S.t('post'),
+                    onPressed: () {
+                      final text = _controller.text.trim();
+                      if (text.isEmpty) return;
+                      Navigator.of(context).pop(ComposeResult(text, _visibility));
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: _type == null ? _choiceStep() : _composeStep(),
         );
       },
-    );
-  }
-
-  Widget _choiceStep() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(S.t('composeTitle'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        const SizedBox(height: 4),
-        Text(S.t('composeSub'), style: const TextStyle(fontSize: 14, color: AppColors.textSecondary, height: 1.4)),
-        const SizedBox(height: 16),
-        _choiceBtn(S.t('ownStory'), S.t('ownStorySub'), () => setState(() => _type = 'story')),
-        _choiceBtn(S.t('suggestion'), S.t('suggestionSub'), () => setState(() => _type = 'suggestion')),
-      ],
-    );
-  }
-
-  Widget _choiceBtn(String title, String sub, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.ink.withOpacity(0.08), width: 1.5),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5)),
-            const SizedBox(height: 2),
-            Text(sub, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _composeStep() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(_type == 'story' ? S.t('ownStory') : S.t('suggestion'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _controller,
-          minLines: 4,
-          maxLines: 6,
-          decoration: InputDecoration(
-            hintText: S.t('composePlaceholder'),
-            filled: true,
-            fillColor: AppColors.bg,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-          ),
-        ),
-        const SizedBox(height: 14),
-        PrimaryButton(
-          label: S.t('post'),
-          onPressed: () {
-            final text = _controller.text.trim();
-            if (text.isEmpty) {
-              Navigator.of(context).pop();
-              return;
-            }
-            Navigator.of(context).pop({'type': _type!, 'text': text});
-          },
-        ),
-      ],
     );
   }
 }

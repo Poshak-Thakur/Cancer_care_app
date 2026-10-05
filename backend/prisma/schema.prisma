@@ -7,10 +7,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// ==========================================
-// CORE CLINICAL & USER MODELS
-// ==========================================
-
 model alert {
   id                  String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   patient_id          String            @db.Uuid
@@ -130,6 +126,18 @@ model caregiverprofile {
   useraccount      useraccount           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
+model caregiverinvite {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id String   @db.Uuid
+  code       String   @unique @db.VarChar(10)
+  is_used    Boolean  @default(false)
+  expires_at DateTime @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  patient    patient  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+
+  @@index([code, is_used])
+}
+
 model consentrecord {
   id                                                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   patient_id                                        String              @db.Uuid
@@ -158,17 +166,18 @@ model patient {
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   alert                alert[]
+  callsession          callsession[]
   careevent            careevent[]
+  caregiverinvite      caregiverinvite[]
+  chatconversation     chatconversation[]
   consentrecord        consentrecord[]
+  medicaldocument      medicaldocument[]
   patientaccountlink   patientaccountlink[]
   patientcaregiverlink patientcaregiverlink[]
   patientmedication    patientmedication[]
   prescription         prescription[]
   staffassignment      staffassignment[]
   symptomevent         symptomevent[]
-  chatconversation     chatconversation[]
-  medicaldocument      medicaldocument[]
-  callsession          callsession[]
 }
 
 model patientaccountlink {
@@ -326,16 +335,25 @@ model useraccount {
   phone_number                                                  String?                @db.VarChar(32)
   preferred_language                                            String                 @default("en") @db.VarChar(10)
   status                                                        String                 @default("ACTIVE") @db.VarChar(50)
+  fcm_token                                                     String?                @db.VarChar(255)
   created_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
   alertrecipient_alertrecipient_recipient_user_idTouseraccount  alertrecipient[]       @relation("alertrecipient_recipient_user_idTouseraccount")
   alertrecipient_alertrecipient_resolver_idTouseraccount        alertrecipient[]       @relation("alertrecipient_resolver_idTouseraccount")
   alertupdate                                                   alertupdate[]
   auditlogentry                                                 auditlogentry[]
+  callsession_caller                                            callsession[]          @relation("call_caller")
+  callsession_receiver                                          callsession[]          @relation("call_receiver")
   careevent                                                     careevent[]
   caregiverprofile                                              caregiverprofile?
+  chat_as_participant_one                                       chatconversation[]     @relation("chat_participant_one")
+  chat_as_participant_two                                       chatconversation[]     @relation("chat_participant_two")
+  chatmessage_sender                                            chatmessage[]
+  communitypost_author                                          communitypost[]        @relation("post_author")
+  communitypost_moderator                                       communitypost[]        @relation("post_moderator")
   consentrecord_consentrecord_granted_byTouseraccount           consentrecord[]        @relation("consentrecord_granted_byTouseraccount")
   consentrecord_consentrecord_grantee_idTouseraccount           consentrecord[]        @relation("consentrecord_grantee_idTouseraccount")
+  medicaldocument_uploader                                      medicaldocument[]      @relation("doc_uploader")
   patientaccountlink_patientaccountlink_granted_byTouseraccount patientaccountlink[]   @relation("patientaccountlink_granted_byTouseraccount")
   patientaccountlink_patientaccountlink_user_idTouseraccount    patientaccountlink[]   @relation("patientaccountlink_user_idTouseraccount")
   patientcaregiverlink                                          patientcaregiverlink[]
@@ -346,19 +364,94 @@ model useraccount {
   staffassignment                                               staffassignment[]
   staffprofile                                                  staffprofile?
   symptomevent                                                  symptomevent[]
-  communitypost_author                                          communitypost[]        @relation("post_author")
-  communitypost_moderator                                       communitypost[]        @relation("post_moderator")
-  chatmessage_sender                                            chatmessage[]
-  chatconvo_part_one                                            chatconversation[]     @relation("chat_participant_one")
-  chatconvo_part_two                                            chatconversation[]     @relation("chat_participant_two")
-  callsession_caller                                            callsession[]          @relation("call_caller")
-  callsession_receiver                                          callsession[]          @relation("call_receiver")
-  medicaldocument_uploader                                      medicaldocument[]      @relation("doc_uploader")
 }
 
-// ==========================================
-// NEW FEATURE ENUMS
-// ==========================================
+model communitypost {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  author_id          String               @db.Uuid
+  content            String
+  media_url          String?              @db.VarChar(1024)
+  visibility         post_visibility_enum @default(PUBLIC)
+  status             post_status_enum     @default(PENDING)
+  moderator_feedback String?
+  moderator_id       String?              @db.Uuid
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  author             useraccount          @relation("post_author", fields: [author_id], references: [id], onDelete: Cascade)
+  moderator          useraccount?         @relation("post_moderator", fields: [moderator_id], references: [id])
+
+  @@index([status, visibility], map: "idx_post_moderation")
+}
+
+model chatconversation {
+  id                 String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id         String        @db.Uuid
+  participant_one_id String?       @db.Uuid
+  participant_two_id String?       @db.Uuid
+  created_at         DateTime      @default(now()) @db.Timestamptz(6)
+  participant_one    useraccount?  @relation("chat_participant_one", fields: [participant_one_id], references: [id])
+  participant_two    useraccount?  @relation("chat_participant_two", fields: [participant_two_id], references: [id])
+  patient            patient       @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  messages           chatmessage[]
+
+  @@index([patient_id], map: "idx_chat_patient")
+  @@index([participant_one_id], map: "idx_chat_participant_one")
+  @@index([participant_two_id], map: "idx_chat_participant_two")
+}
+
+model chatmessage {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String            @db.Uuid
+  sender_id       String            @db.Uuid
+  message_type    message_type_enum @default(TEXT)
+  content         String?
+  media_url       String?           @db.VarChar(1024)
+  is_read         Boolean           @default(false)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  conversation    chatconversation  @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender          useraccount       @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at], map: "idx_chat_history")
+}
+
+model callsession {
+  id            String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  caller_id     String           @db.Uuid
+  receiver_id   String           @db.Uuid
+  status        call_status_enum @default(SCHEDULED)
+  provider_room String?          @db.VarChar(255)
+  scheduled_for DateTime?        @db.Timestamptz(6)
+  started_at    DateTime?        @db.Timestamptz(6)
+  ended_at      DateTime?        @db.Timestamptz(6)
+  created_at    DateTime         @default(now()) @db.Timestamptz(6)
+  call_type     call_type_enum   @default(VIDEO)
+  patient_id    String?          @db.Uuid
+  caller        useraccount      @relation("call_caller", fields: [caller_id], references: [id], onDelete: Cascade)
+  patient       patient?         @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  receiver      useraccount      @relation("call_receiver", fields: [receiver_id], references: [id], onDelete: Cascade)
+
+  @@index([caller_id, receiver_id], map: "idx_call_participants")
+}
+
+model medicaldocument {
+  id                  String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id          String                   @db.Uuid
+  document_type       document_type_enum       @default(OTHER)
+  title               String                   @db.VarChar(255)
+  file_path           String                   @db.VarChar(1024)
+  mime_type           String                   @db.VarChar(100)
+  file_size_bytes     BigInt
+  extracted_text      String?
+  raw_ocr_payload     Json?
+  verification_status verification_status_enum @default(PENDING)
+  is_private          Boolean                  @default(true)
+  uploaded_by         String                   @db.Uuid
+  uploaded_at         DateTime                 @default(now()) @db.Timestamptz(6)
+  patient             patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  uploader            useraccount              @relation("doc_uploader", fields: [uploaded_by], references: [id], onDelete: NoAction)
+
+  @@index([patient_id, document_type], map: "idx_medical_doc_patient")
+}
 
 enum post_visibility_enum {
   PUBLIC
@@ -380,10 +473,10 @@ enum message_type_enum {
 
 enum call_status_enum {
   SCHEDULED
-  INITIATED
   ONGOING
   COMPLETED
   MISSED
+  INITIATED
   REJECTED
 }
 
@@ -399,105 +492,6 @@ enum document_type_enum {
   DISCHARGE_SUMMARY
   OTHER
 }
-
-// ==========================================
-// NEW FEATURE MODELS
-// ==========================================
-
-model communitypost {
-  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  author_id          String               @db.Uuid
-  content            String               @db.Text
-  media_url          String?              @db.VarChar(1024)
-  visibility         post_visibility_enum @default(PUBLIC)
-  status             post_status_enum     @default(PENDING)
-  moderator_feedback String?              @db.Text
-  moderator_id       String?              @db.Uuid
-  created_at         DateTime             @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
-
-  author             useraccount          @relation("post_author", fields: [author_id], references: [id], onDelete: Cascade)
-  moderator          useraccount?         @relation("post_moderator", fields: [moderator_id], references: [id], onDelete: SetNull)
-
-  @@index([status, visibility], map: "idx_post_moderation")
-}
-
-model chatconversation {
-  id                 String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  patient_id         String        @db.Uuid
-  participant_one_id String        @db.Uuid
-  participant_two_id String        @db.Uuid
-  created_at         DateTime      @default(now()) @db.Timestamptz(6)
-
-  patient            patient       @relation(fields: [patient_id], references: [id], onDelete: Cascade)
-  participant_one    useraccount   @relation("chat_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade)
-  participant_two    useraccount   @relation("chat_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade)
-  messages           chatmessage[]
-
-  @@index([patient_id], map: "idx_chat_patient")
-  @@index([participant_one_id, participant_two_id], map: "idx_chat_participants")
-}
-
-model chatmessage {
-  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  conversation_id String            @db.Uuid
-  sender_id       String            @db.Uuid
-  message_type    message_type_enum @default(TEXT)
-  content         String?           @db.Text
-  media_url       String?           @db.VarChar(1024)
-  is_read         Boolean           @default(false)
-  created_at      DateTime          @default(now()) @db.Timestamptz(6)
-
-  conversation    chatconversation  @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  sender          useraccount       @relation(fields: [sender_id], references: [id], onDelete: Cascade)
-
-  @@index([conversation_id, created_at], map: "idx_chat_history")
-}
-
-model callsession {
-  id            String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  caller_id     String           @db.Uuid
-  receiver_id   String           @db.Uuid
-  patient_id    String?          @db.Uuid
-  call_type     call_type_enum   @default(VIDEO)
-  status        call_status_enum @default(SCHEDULED)
-  provider_room String?          @db.VarChar(255)
-  scheduled_for DateTime?        @db.Timestamptz(6)
-  started_at    DateTime?        @db.Timestamptz(6)
-  ended_at      DateTime?        @db.Timestamptz(6)
-  created_at    DateTime         @default(now()) @db.Timestamptz(6)
-
-  caller        useraccount      @relation("call_caller", fields: [caller_id], references: [id], onDelete: Cascade)
-  receiver      useraccount      @relation("call_receiver", fields: [receiver_id], references: [id], onDelete: Cascade)
-  patient       patient?         @relation(fields: [patient_id], references: [id], onDelete: Cascade)
-
-  @@index([caller_id, receiver_id], map: "idx_call_participants")
-}
-
-model medicaldocument {
-  id                  String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  patient_id          String                   @db.Uuid
-  document_type       document_type_enum       @default(OTHER)
-  title               String                   @db.VarChar(255)
-  file_path           String                   @db.VarChar(1024)
-  mime_type           String                   @db.VarChar(100)
-  file_size_bytes     BigInt
-  extracted_text      String?                  @db.Text
-  raw_ocr_payload     Json?
-  verification_status verification_status_enum @default(PENDING)
-  is_private          Boolean                  @default(true)
-  uploaded_by         String                   @db.Uuid
-  uploaded_at         DateTime                 @default(now()) @db.Timestamptz(6)
-
-  patient             patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
-  uploader            useraccount              @relation("doc_uploader", fields: [uploaded_by], references: [id], onDelete: NoAction)
-
-  @@index([patient_id, document_type], map: "idx_medical_doc_patient")
-}
-
-// ==========================================
-// EXISTING ENUMS
-// ==========================================
 
 enum account_link_type {
   SELF

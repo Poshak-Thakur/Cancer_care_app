@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+require('./config/firebase');
+
 const authRoutes = require('./routes/authRoutes');
 const patientRoutes = require('./routes/patientRoutes');
 const careEventRoutes = require('./routes/careEventRoutes');
@@ -13,9 +15,21 @@ const callRoutes = require('./routes/callRoutes');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://admin.saathi.org', 'https://ngo.saathi.org'] 
+    : '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+    console.log(`[${req.method}] ${req.url}`);
+    next();
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);

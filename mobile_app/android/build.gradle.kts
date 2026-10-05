@@ -22,3 +22,12 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.api.variant.LibraryAndroidComponentsExtension> {
+            finalizeDsl { android ->
+                android.compileSdk = 36
+            }
+        }
+    }
+}

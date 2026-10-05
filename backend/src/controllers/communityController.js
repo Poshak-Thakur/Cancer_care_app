@@ -1,4 +1,5 @@
 const prisma = require('../config/db');
+const { isCentralCounsellor } = require('../services/authorizationService');
 
 exports.createPost = async (req, res, next) => {
     try {
@@ -6,6 +7,7 @@ exports.createPost = async (req, res, next) => {
         const userId = req.user.userId;
 
         if (!content) return res.status(400).json({ status: 'error', message: 'Post content is required.' });
+        if (!['PUBLIC', 'PRIVATE'].includes(visibility)) return res.status(400).json({ status: 'error', message: 'Invalid visibility value.' });
 
         const post = await prisma.communitypost.create({
             data: { author_id: userId, content, media_url: media_url || null, visibility }
@@ -14,11 +16,7 @@ exports.createPost = async (req, res, next) => {
         const privateMessage = "Your entry is completely hidden from the community. For your safety and care, it is securely shared with your NGO counselor so they can support you.";
         const publicMessage = "Post submitted successfully. It will appear in the community feed once approved by a moderator.";
 
-        return res.status(201).json({ 
-            status: 'success', 
-            message: visibility === 'PRIVATE' ? privateMessage : publicMessage,
-            data: post 
-        });
+        return res.status(201).json({ status: 'success', message: visibility === 'PRIVATE' ? privateMessage : publicMessage, data: post });
     } catch (error) { next(error); }
 };
 
@@ -36,7 +34,8 @@ exports.getPublicFeed = async (req, res, next) => {
 exports.getModerationQueue = async (req, res, next) => {
     try {
         const userId = req.user.userId;
-        const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
+        const isStaff = await isCentralCounsellor(userId);
+        
         if (!isStaff) return res.status(403).json({ status: 'error', message: 'Only NGO staff can access the moderation queue.' });
 
         const posts = await prisma.communitypost.findMany({
@@ -59,7 +58,11 @@ exports.moderatePost = async (req, res, next) => {
         const { status, moderator_feedback } = req.body;
         const userId = req.user.userId;
 
-        const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
+        if (!['PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid moderation status.' });
+        }
+
+        const isStaff = await isCentralCounsellor(userId);
         if (!isStaff) return res.status(403).json({ status: 'error', message: 'Only authorized NGO staff can moderate posts.' });
 
         if (status === 'REJECTED' && !moderator_feedback) {

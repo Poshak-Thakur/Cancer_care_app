@@ -19,10 +19,12 @@ const otpVerifyLimiter = rateLimit({
 
 router.post('/request-otp', otpRequestLimiter, authController.requestOtp);
 router.post('/verify-otp', otpVerifyLimiter, authController.verifyOtp);
-
 router.post('/refresh', authController.refreshToken);
-router.post('/logout', authMiddleware, authController.logout);
 
-router.get('/me', authMiddleware, authController.getMe);
+router.use(authMiddleware);
+
+router.get('/me', authController.getMe);
+router.post('/logout', authController.logout);
+router.post('/fcm-token', authController.updateFcmToken);
 
 module.exports = router;

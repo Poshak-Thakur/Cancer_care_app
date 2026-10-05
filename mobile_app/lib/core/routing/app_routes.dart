@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 /// Thin navigation helpers so screens don't repeat MaterialPageRoute boilerplate.
-/// Swap the internals for go_router / named routes later without touching screens.
 class AppRoutes {
+  /// Lets code outside a widget tree (socket events, session expiry) navigate.
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  static final GlobalKey<ScaffoldMessengerState> messengerKey = GlobalKey<ScaffoldMessengerState>();
+
   static Future<T?> push<T>(BuildContext context, Widget page) {
     return Navigator.of(context).push<T>(MaterialPageRoute(builder: (_) => page));
   }
@@ -23,5 +26,17 @@ class AppRoutes {
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
       ),
     );
+  }
+
+  /// Same as [pushAndClear] but without a BuildContext.
+  static Future<T?>? pushAndClearGlobal<T>(Widget page) {
+    return navigatorKey.currentState?.pushAndRemoveUntil<T>(
+      MaterialPageRoute(builder: (_) => page),
+      (route) => false,
+    );
+  }
+
+  static Future<T?>? pushGlobal<T>(Widget page) {
+    return navigatorKey.currentState?.push<T>(MaterialPageRoute(builder: (_) => page));
   }
 }

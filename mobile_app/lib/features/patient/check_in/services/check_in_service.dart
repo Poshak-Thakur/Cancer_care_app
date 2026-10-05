@@ -6,32 +6,33 @@ class CheckInService {
 
   /// Converts the check-in screen's selections (0 = best .. 3 = worst per
   /// question) into the backend's observation list (severity 1-10).
+  /// Unanswered questions are skipped.
   ///
-  /// ASSUMPTION: observation_type values PAIN / FATIGUE / APPETITE / MOOD must
-  /// match the backend's enum — confirm against the Prisma schema.
+  /// observation_type is a free VarChar(50) in the schema, but
+  /// symptomobservation has a DB check constraint — confirm PAIN / FATIGUE /
+  /// APPETITE / MOOD and the severity range are allowed by it.
   static List<Map<String, dynamic>> observationsFromSelections(Map<String, int?> selected) {
     const severityByLevel = [1, 4, 7, 10];
     return [
       for (final e in selected.entries)
         if (e.value != null)
-          {'observation_type': e.key.toUpperCase(), 'severity': severityByLevel[e.value!]},
+          {'observation_type': e.key.toUpperCase(), 'severity': severityByLevel[e.value!.clamp(0, severityByLevel.length - 1)].clamp(0, 10)},
     ];
   }
 
-  Future<Map<String, dynamic>> submit({
+  Future<void> submit({
     required String patientId,
     required List<Map<String, dynamic>> observations,
   }) async {
-    final res = await _api.post(ApiEndpoints.checkIn, body: {
+    await _api.post(ApiEndpoints.checkIn, body: {
       'patient_id': patientId,
       'observations': observations,
     });
-    return Map<String, dynamic>.from(res['data'] as Map);
   }
 
-  /// { completed: bool, details?: {...} }
-  Future<Map<String, dynamic>> todayStatus(String patientId) async {
+  Future<bool> completedToday(String patientId) async {
     final res = await _api.get(ApiEndpoints.todayCheckIn(patientId));
-    return Map<String, dynamic>.from(res['data'] as Map);
+    final data = res['data'] as Map<String, dynamic>;
+    return data['completed'] as bool;
   }
 }
