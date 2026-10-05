@@ -5,8 +5,13 @@ const requirePatientAccess = require('../middleware/rbacMiddleware');
 
 const router = express.Router();
 
+// Enforce JWT validation for all routes
 router.use(authMiddleware);
 
+// NEW: AI Parser for both Voice Dictation and Typed Text commands
+router.post('/parse-command', careEventController.parseCommand);
+
+// Existing CRUD for Care Events
 router.get('/daily/:patient_id', requirePatientAccess(), careEventController.getDailyEvents);
 router.post('/', requirePatientAccess(), careEventController.createEvent);
 router.patch('/:id/status', careEventController.updateEventStatus); 

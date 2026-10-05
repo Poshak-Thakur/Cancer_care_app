@@ -8,16 +8,28 @@ const VALID_CALL_TYPES = ['AUDIO', 'VIDEO'];
 
 exports.initiateCall = async (req, res, next) => {
     try {
+        // patient_id is now optional
         const { receiver_id, patient_id, call_type = 'VIDEO' } = req.body;
         const callerId = req.user.userId;
 
-        if (!receiver_id || !patient_id || !VALID_CALL_TYPES.includes(call_type)) {
-            return res.status(400).json({ status: 'error', message: 'receiver_id, patient_id, and call_type are strictly required.' });
+        if (!receiver_id || !VALID_CALL_TYPES.includes(call_type)) {
+            return res.status(400).json({ status: 'error', message: 'receiver_id and call_type are required.' });
         }
 
-        const isAuthorized = await verifyCommunicationAccess(callerId, receiver_id, patient_id);
-        if (!isAuthorized) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized calling participant combination for this patient context.' });
+        // Check if receiver is NGO Staff (Helpline)
+        const isTargetStaff = await prisma.staffprofile.findFirst({
+            where: { user_id: receiver_id, is_active: true }
+        });
+
+        // If not calling the Helpline, a patient_id context and strict authorization is required
+        if (!isTargetStaff) {
+            if (!patient_id) {
+                return res.status(400).json({ status: 'error', message: 'patient_id is required unless calling the NGO Helpline.' });
+            }
+            const isAuthorized = await verifyCommunicationAccess(callerId, receiver_id, patient_id);
+            if (!isAuthorized) {
+                return res.status(403).json({ status: 'error', message: 'Unauthorized calling participant combination.' });
+            }
         }
 
         const channelName = `saathi_room_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -37,14 +49,14 @@ exports.initiateCall = async (req, res, next) => {
             data: {
                 caller_id: callerId,
                 receiver_id: receiver_id,
-                patient_id: patient_id,
+                patient_id: patient_id || null, // Allow null for direct helpline calls
                 call_type: call_type,
                 status: 'INITIATED',
                 provider_room: channelName
             }
         });
 
-        // Determine Caller Display Name
+        // Determine Caller Display Name dynamically
         let callerName = "Saathi User";
         const patientLink = await prisma.patientaccountlink.findFirst({ where: { user_id: callerId }, include: { patient: true } });
         if (patientLink?.patient?.full_name) {
@@ -73,7 +85,7 @@ exports.initiateCall = async (req, res, next) => {
             });
         }
 
-        // 2. High-priority Call Push (Wakes up closed or backgrounded app)
+        // 2. High-priority FCM Push (Wakes up closed or backgrounded app)
         const receiver = await prisma.useraccount.findUnique({ where: { id: receiver_id } });
         if (receiver && receiver.fcm_token) {
             await sendCallPushNotification(receiver.fcm_token, {
@@ -100,7 +112,7 @@ exports.getIncomingCalls = async (req, res, next) => {
                 status: 'INITIATED',
                 created_at: { gte: new Date(Date.now() - 2 * 60 * 1000) } 
             },
-            include: { caller: { select: { id: true, email: true } } },
+            include: { caller: { select: { id: true, email: true, full_name: true } } },
             orderBy: { created_at: 'desc' }
         });
         return res.status(200).json({ status: 'success', data: incomingCalls });

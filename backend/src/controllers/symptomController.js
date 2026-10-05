@@ -15,7 +15,6 @@ exports.submitCheckIn = async (req, res, next) => {
             return res.status(400).json({ status: 'error', message: 'At least one symptom observation is required.' });
         }
 
-        // Validate observation types and severity range
         for (const obs of observations) {
             if (!obs.observation_type || typeof obs.observation_type !== 'string') {
                 return res.status(400).json({ status: 'error', message: 'Each observation must include an observation_type string.' });
@@ -49,9 +48,10 @@ exports.submitCheckIn = async (req, res, next) => {
                 }
             });
 
+            // Maps whatever the Flutter app sends dynamically
             const observationData = observations.map(obs => ({
                 symptom_event_id: event.id,
-                observation_type: obs.observation_type,
+                observation_type: obs.observation_type.toUpperCase(),
                 severity: obs.severity !== undefined && obs.severity !== null ? Number(obs.severity) : null,
                 numeric_value: obs.numeric_value !== undefined && obs.numeric_value !== null ? obs.numeric_value : null,
                 unit: obs.unit || null,
@@ -64,8 +64,6 @@ exports.submitCheckIn = async (req, res, next) => {
 
             return event;
         });
-
-        // Unintended side effect of completing care events has been removed
 
         return res.status(201).json({
             status: 'success',

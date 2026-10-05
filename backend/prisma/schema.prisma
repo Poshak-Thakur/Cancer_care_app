@@ -336,6 +336,11 @@ model useraccount {
   preferred_language                                            String                 @default("en") @db.VarChar(10)
   status                                                        String                 @default("ACTIVE") @db.VarChar(50)
   fcm_token                                                     String?                @db.VarChar(255)
+  
+  full_name                                                     String?                @db.VarChar(255)
+  date_of_birth                                                 DateTime?              @db.Date
+  avatar_url                                                    String?                @db.VarChar(1024)
+  
   created_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                                                    DateTime               @default(now()) @db.Timestamptz(6)
   alertrecipient_alertrecipient_recipient_user_idTouseraccount  alertrecipient[]       @relation("alertrecipient_recipient_user_idTouseraccount")
@@ -364,34 +369,89 @@ model useraccount {
   staffassignment                                               staffassignment[]
   staffprofile                                                  staffprofile?
   symptomevent                                                  symptomevent[]
+  
+  postlike                                                      postlike[]
+  postcomment                                                   postcomment[]
+  pollvote                                                      pollvote[]
 }
 
 model communitypost {
   id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   author_id          String               @db.Uuid
+  post_type          post_type_enum       @default(TEXT)
   content            String
-  media_url          String?              @db.VarChar(1024)
+  media_urls         String[]             
+  video_duration     Int?                 
   visibility         post_visibility_enum @default(PUBLIC)
-  status             post_status_enum     @default(PENDING)
+  status             post_status_enum     @default(PENDING) 
   moderator_feedback String?
   moderator_id       String?              @db.Uuid
   created_at         DateTime             @default(now()) @db.Timestamptz(6)
   updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  
   author             useraccount          @relation("post_author", fields: [author_id], references: [id], onDelete: Cascade)
   moderator          useraccount?         @relation("post_moderator", fields: [moderator_id], references: [id])
+  
+  postlike           postlike[]
+  postcomment        postcomment[]
+  polloption         polloption[]
 
   @@index([status, visibility], map: "idx_post_moderation")
 }
 
+model postlike {
+  id         String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  post_id    String        @db.Uuid
+  user_id    String        @db.Uuid
+  created_at DateTime      @default(now()) @db.Timestamptz(6)
+  
+  post       communitypost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user       useraccount   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, user_id]) 
+}
+
+model postcomment {
+  id         String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  post_id    String        @db.Uuid
+  user_id    String        @db.Uuid
+  content    String
+  created_at DateTime      @default(now()) @db.Timestamptz(6)
+  
+  post       communitypost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user       useraccount   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model polloption {
+  id         String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  post_id    String        @db.Uuid
+  option     String        @db.VarChar(255)
+  
+  post       communitypost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  pollvote   pollvote[]
+}
+
+model pollvote {
+  id            String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  polloption_id String     @db.Uuid
+  user_id       String     @db.Uuid
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  
+  option        polloption @relation(fields: [polloption_id], references: [id], onDelete: Cascade)
+  user          useraccount @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([polloption_id, user_id]) 
+}
+
 model chatconversation {
   id                 String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  patient_id         String        @db.Uuid
+  patient_id         String?       @db.Uuid
   participant_one_id String?       @db.Uuid
   participant_two_id String?       @db.Uuid
   created_at         DateTime      @default(now()) @db.Timestamptz(6)
   participant_one    useraccount?  @relation("chat_participant_one", fields: [participant_one_id], references: [id])
   participant_two    useraccount?  @relation("chat_participant_two", fields: [participant_two_id], references: [id])
-  patient            patient       @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  patient            patient?      @relation(fields: [patient_id], references: [id], onDelete: Cascade)
   messages           chatmessage[]
 
   @@index([patient_id], map: "idx_chat_patient")
@@ -451,6 +511,13 @@ model medicaldocument {
   uploader            useraccount              @relation("doc_uploader", fields: [uploaded_by], references: [id], onDelete: NoAction)
 
   @@index([patient_id, document_type], map: "idx_medical_doc_patient")
+}
+
+enum post_type_enum {
+  TEXT
+  IMAGE
+  VIDEO
+  POLL
 }
 
 enum post_visibility_enum {

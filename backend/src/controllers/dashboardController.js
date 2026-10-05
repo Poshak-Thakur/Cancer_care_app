@@ -15,6 +15,7 @@ exports.getDashboardOverview = async (req, res, next) => {
         const accessScopes = link?.access_scopes || ['ALL'];
         const relationship = link?.relationship_label || link?.relationship_type || role;
 
+        // Ensure we fetch from midnight to midnight for the "Today" view
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date();
@@ -28,7 +29,9 @@ exports.getDashboardOverview = async (req, res, next) => {
             }),
             prisma.symptomevent.findFirst({
                 where: { patient_id: patient_id, recorded_at: { gte: startOfDay, lte: endOfDay }, source: 'ROUTINE' },
-                orderBy: { recorded_at: 'desc' }
+                orderBy: { recorded_at: 'desc' },
+                // NEW: Include the dynamic fields we just built for the Check-In feature
+                include: { symptomobservation: true } 
             }),
             prisma.alert.findMany({
                 where: { patient_id: patient_id, status: { in: ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS'] } },
@@ -39,7 +42,8 @@ exports.getDashboardOverview = async (req, res, next) => {
                 where: { patient_id: patient_id },
                 orderBy: { uploaded_at: 'desc' },
                 take: 3,
-                select: { id: true, title: true, document_type: true, uploaded_at: true }
+                // NEW: Added verification_status so the UI can show OCR pending states
+                select: { id: true, title: true, document_type: true, uploaded_at: true, verification_status: true }
             })
         ]);
 

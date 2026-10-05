@@ -1,30 +1,84 @@
 const prisma = require('../config/db');
+const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const { verifyPatientDataEventAccess } = require('../services/authorizationService');
 
-exports.createProfile = async (req, res, next) => {
-    try {
-        const { caregiver_type } = req.body; 
-        const userId = req.user.userId;
+// Initialize Supabase for avatar uploads
+const supabase = (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY))
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
+    : null;
 
-        if (!['FAMILY', 'VOLUNTEER'].includes(caregiver_type)) {
-            return res.status(400).json({ status: 'error', message: 'caregiver_type must be FAMILY or VOLUNTEER' });
+// ==========================================
+// PROFILE MANAGEMENT
+// ==========================================
+
+exports.upsertProfile = async (req, res, next) => {
+    try {
+        const userId = req.user.userId;
+        const { full_name, caregiver_type = 'FAMILY' } = req.body;
+
+        if (!full_name) {
+            return res.status(400).json({ status: 'error', message: 'full_name is required.' });
         }
 
-        const profile = await prisma.caregiverprofile.create({
-            data: {
-                user_id: userId,
-                caregiver_type,
-                volunteer_status: caregiver_type === 'VOLUNTEER' ? 'PENDING' : 'APPROVED' 
-            }
+        const updatedUser = await prisma.useraccount.update({
+            where: { id: userId },
+            data: { full_name }
         });
 
-        return res.status(201).json({ status: 'success', data: profile });
-    } catch (error) {
-        if (error.code === 'P2002') return res.status(409).json({ status: 'error', message: 'Caregiver profile already exists.' });
-        next(error);
-    }
+        const profile = await prisma.caregiverprofile.upsert({
+            where: { user_id: userId },
+            update: { caregiver_type },
+            create: { user_id: userId, caregiver_type }
+        });
+
+        return res.status(200).json({ status: 'success', message: 'Profile saved.', data: { user: updatedUser, profile } });
+    } catch (error) { next(error); }
 };
+
+exports.getProfile = async (req, res, next) => {
+    try {
+        const userId = req.user.userId;
+        const user = await prisma.useraccount.findUnique({
+            where: { id: userId },
+            include: { caregiverprofile: true }
+        });
+        return res.status(200).json({ status: 'success', data: user });
+    } catch (error) { next(error); }
+};
+
+exports.uploadAvatar = async (req, res, next) => {
+    try {
+        const userId = req.user.userId;
+        const file = req.file;
+
+        if (!file) return res.status(400).json({ status: 'error', message: 'Avatar image is required.' });
+        if (!supabase) return res.status(500).json({ status: 'error', message: 'Storage not configured.' });
+
+        // Reuse the public community_media bucket for fast avatar rendering without signed URL overhead
+        const fileExt = file.originalname?.split('.').pop() || 'jpg';
+        const fileName = `avatars/${userId}_${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('community_media')
+            .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage.from('community_media').getPublicUrl(fileName);
+
+        const updatedUser = await prisma.useraccount.update({
+            where: { id: userId },
+            data: { avatar_url: data.publicUrl }
+        });
+
+        return res.status(200).json({ status: 'success', data: { avatar_url: updatedUser.avatar_url } });
+    } catch (error) { next(error); }
+};
+
+// ==========================================
+// PATIENT LINKING & MANAGEMENT
+// ==========================================
 
 exports.generateInvite = async (req, res, next) => {
     try {

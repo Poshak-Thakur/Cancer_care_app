@@ -24,6 +24,7 @@ router.post('/refresh', authController.refreshToken);
 router.use(authMiddleware);
 
 router.get('/me', authController.getMe);
+router.patch('/profile', authController.updateProfile);
 router.post('/logout', authController.logout);
 router.post('/fcm-token', authController.updateFcmToken);
 

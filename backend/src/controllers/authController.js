@@ -103,10 +103,16 @@ exports.verifyOtp = async (req, res, next) => {
         if (!user) user = await prisma.useraccount.create({ data: { email: cleanEmail } });
 
         const roles = await getUserRoles(user.id);
+        const isProfileCompleted = !!user.full_name;
         const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
         const refreshToken = await generateRefreshToken(user.id);
         
-        return res.status(200).json({ status: 'success', token, refresh_token: refreshToken, user: { ...user, roles } });
+        return res.status(200).json({ 
+            status: 'success', 
+            token, 
+            refresh_token: refreshToken, 
+            user: { ...user, roles, is_profile_completed: isProfileCompleted } 
+        });
     } catch (error) { next(error); }
 };
 
@@ -114,11 +120,76 @@ exports.getMe = async (req, res, next) => {
     try {
         const user = await prisma.useraccount.findUnique({
             where: { id: req.user.userId },
-            select: { id: true, email: true, phone_number: true, preferred_language: true, status: true, created_at: true }
+            select: { 
+                id: true, 
+                email: true, 
+                full_name: true,
+                date_of_birth: true,
+                avatar_url: true,
+                phone_number: true, 
+                preferred_language: true, 
+                status: true, 
+                created_at: true,
+                caregiverprofile: true
+            }
         });
         if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+        
         const roles = await getUserRoles(user.id);
-        return res.status(200).json({ status: 'success', data: { ...user, roles } });
+        const isProfileCompleted = !!user.full_name;
+
+        return res.status(200).json({ 
+            status: 'success', 
+            data: { ...user, roles, is_profile_completed: isProfileCompleted } 
+        });
+    } catch (error) { next(error); }
+};
+
+exports.updateProfile = async (req, res, next) => {
+    try {
+        const userId = req.user.userId;
+        const { full_name, date_of_birth, phone_number, preferred_language, caregiver_type } = req.body;
+
+        const updateData = {};
+        if (full_name !== undefined) updateData.full_name = full_name.trim();
+        if (date_of_birth !== undefined) updateData.date_of_birth = new Date(date_of_birth);
+        if (phone_number !== undefined) updateData.phone_number = phone_number.trim();
+        if (preferred_language !== undefined) updateData.preferred_language = preferred_language;
+
+        const updatedUser = await prisma.useraccount.update({
+            where: { id: userId },
+            data: updateData,
+            select: {
+                id: true,
+                email: true,
+                full_name: true,
+                date_of_birth: true,
+                phone_number: true,
+                avatar_url: true,
+                preferred_language: true,
+                status: true
+            }
+        });
+
+        if (caregiver_type && ['FAMILY', 'VOLUNTEER'].includes(caregiver_type)) {
+            await prisma.caregiverprofile.upsert({
+                where: { user_id: userId },
+                update: { caregiver_type },
+                create: {
+                    user_id: userId,
+                    caregiver_type,
+                    volunteer_status: caregiver_type === 'VOLUNTEER' ? 'PENDING' : 'APPROVED'
+                }
+            });
+        }
+
+        const roles = await getUserRoles(userId);
+
+        return res.status(200).json({
+            status: 'success',
+            message: 'Profile updated successfully.',
+            data: { ...updatedUser, roles, is_profile_completed: !!updatedUser.full_name }
+        });
     } catch (error) { next(error); }
 };
 

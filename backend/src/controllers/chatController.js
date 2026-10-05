@@ -34,7 +34,6 @@ exports.uploadAudio = async (req, res, next) => {
             return res.status(500).json({ status: 'error', message: `Storage upload failed: ${uploadError.message}` });
         }
 
-        // 3-Day Signed URL for audio notes
         const { data: urlData, error: signError } = await supabase.storage
             .from('voice_notes')
             .createSignedUrl(fileName, 259200);
@@ -131,21 +130,26 @@ exports.getContacts = async (req, res, next) => {
 
 exports.openThread = async (req, res, next) => {
     try {
-        const { patient_id, participant_id } = req.body;
+        const { participant_id, patient_id } = req.body;
         const userId = req.user.userId;
 
-        if (!patient_id || !participant_id) {
-            return res.status(400).json({ status: 'error', message: 'patient_id and participant_id are required.' });
+        if (!participant_id) {
+            return res.status(400).json({ status: 'error', message: 'participant_id is required.' });
         }
 
-        const isAuthorized = await verifyCommunicationAccess(userId, participant_id, patient_id);
-        if (!isAuthorized) {
-            return res.status(403).json({ status: 'error', message: 'Unauthorized to initiate a conversation with this participant.' });
+        const isTargetStaff = await prisma.staffprofile.findFirst({
+            where: { user_id: participant_id, is_active: true }
+        });
+
+        if (!isTargetStaff && patient_id) {
+            const isAuthorized = await verifyCommunicationAccess(userId, participant_id, patient_id);
+            if (!isAuthorized) {
+                return res.status(403).json({ status: 'error', message: 'Unauthorized communication participant combination.' });
+            }
         }
 
         let conversation = await prisma.chatconversation.findFirst({
             where: {
-                patient_id,
                 OR: [
                     { participant_one_id: userId, participant_two_id: participant_id },
                     { participant_one_id: participant_id, participant_two_id: userId }
@@ -155,7 +159,11 @@ exports.openThread = async (req, res, next) => {
 
         if (!conversation) {
             conversation = await prisma.chatconversation.create({
-                data: { patient_id, participant_one_id: userId, participant_two_id: participant_id }
+                data: {
+                    patient_id: patient_id || null,
+                    participant_one_id: userId,
+                    participant_two_id: participant_id
+                }
             });
         }
 
@@ -242,13 +250,11 @@ exports.sendMessage = async (req, res, next) => {
             ? conversation.participant_two_id 
             : conversation.participant_one_id;
 
-        // 1. WebSocket live delivery
         const io = req.app.get('io');
         if (io) {
             io.to(recipientId).emit('newMessage', message);
         }
 
-        // 2. Standard FCM Push Notification
         const [recipient, senderAccount] = await Promise.all([
             prisma.useraccount.findUnique({ where: { id: recipientId } }),
             prisma.useraccount.findUnique({ where: { id: userId } })

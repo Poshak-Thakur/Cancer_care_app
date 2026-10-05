@@ -9,5 +9,6 @@ router.use(authMiddleware);
 
 router.post('/check-in', requirePatientAccess(), symptomController.submitCheckIn);
 router.get('/today/:patient_id', requirePatientAccess(), symptomController.getTodayCheckInStatus);
+router.get('/history/:patient_id', requirePatientAccess(), symptomController.getSymptomHistory);
 
 module.exports = router;
