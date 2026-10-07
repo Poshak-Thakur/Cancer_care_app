@@ -1,35 +1,39 @@
 const prisma = require('../config/db');
 const crypto = require('crypto');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
-const { verifyCommunicationAccess } = require('../services/authorizationService');
-const { sendCallPushNotification } = require('../config/firebase');
+const { verifyCommunicationAccess, isCentralCounsellor } = require('../services/authorizationService');
+const { isUuid } = require('../utils/validators');
+const { sendCallPushNotification, sendCallCancelledPush } = require('../config/firebase');
 
 const VALID_CALL_TYPES = ['AUDIO', 'VIDEO'];
 
 exports.initiateCall = async (req, res, next) => {
     try {
-        // patient_id is now optional
         const { receiver_id, patient_id, call_type = 'VIDEO' } = req.body;
         const callerId = req.user.userId;
 
         if (!receiver_id || !VALID_CALL_TYPES.includes(call_type)) {
             return res.status(400).json({ status: 'error', message: 'receiver_id and call_type are required.' });
         }
+        if (!isUuid(receiver_id)) {
+            return res.status(400).json({ status: 'error', message: 'receiver_id must be a valid UUID.' });
+        }
+        const hasPatientContext = patient_id !== undefined && patient_id !== null && patient_id !== '';
+        if (hasPatientContext && !isUuid(patient_id)) {
+            return res.status(400).json({ status: 'error', message: 'patient_id must be a valid UUID.' });
+        }
+        const patientContextId = hasPatientContext ? patient_id : null;
 
-        // Check if receiver is NGO Staff (Helpline)
-        const isTargetStaff = await prisma.staffprofile.findFirst({
-            where: { user_id: receiver_id, is_active: true }
-        });
+        // patient_id may be null for a direct call to the NGO counsellor. Whether a call is
+        // allowed is decided ONLY by verifyCommunicationAccess - no staff logic lives here.
+        const isAuthorized = await verifyCommunicationAccess(callerId, receiver_id, patientContextId);
+        if (!isAuthorized) {
+            return res.status(403).json({ status: 'error', message: 'Unauthorized calling participant combination.' });
+        }
 
-        // If not calling the Helpline, a patient_id context and strict authorization is required
-        if (!isTargetStaff) {
-            if (!patient_id) {
-                return res.status(400).json({ status: 'error', message: 'patient_id is required unless calling the NGO Helpline.' });
-            }
-            const isAuthorized = await verifyCommunicationAccess(callerId, receiver_id, patient_id);
-            if (!isAuthorized) {
-                return res.status(403).json({ status: 'error', message: 'Unauthorized calling participant combination.' });
-            }
+        const receiver = await prisma.useraccount.findUnique({ where: { id: receiver_id } });
+        if (!receiver) {
+            return res.status(404).json({ status: 'error', message: 'Receiver not found.' });
         }
 
         const channelName = `saathi_room_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -49,29 +53,31 @@ exports.initiateCall = async (req, res, next) => {
             data: {
                 caller_id: callerId,
                 receiver_id: receiver_id,
-                patient_id: patient_id || null, // Allow null for direct helpline calls
+                patient_id: patientContextId,
                 call_type: call_type,
                 status: 'INITIATED',
                 provider_room: channelName
             }
         });
 
-        // Determine Caller Display Name dynamically
         let callerName = "Saathi User";
-        const patientLink = await prisma.patientaccountlink.findFirst({ where: { user_id: callerId }, include: { patient: true } });
-        if (patientLink?.patient?.full_name) {
-            callerName = patientLink.patient.full_name;
+        if (await isCentralCounsellor(callerId)) {
+            callerName = "NGO Counsellor";
         } else {
-            const staffLink = await prisma.staffassignment.findFirst({ where: { staff_user_id: callerId } });
-            if (staffLink) {
-                callerName = "NGO Counsellor";
+            const patientLink = await prisma.patientaccountlink.findFirst({
+                where: { user_id: callerId, consent_status: 'GRANTED' },
+                include: { patient: true }
+            });
+            if (patientLink?.patient?.full_name) {
+                callerName = patientLink.patient.full_name;
             } else {
-                const careLink = await prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: callerId } });
+                const careLink = await prisma.patientcaregiverlink.findFirst({
+                    where: { caregiver_user_id: callerId, consent_status: 'GRANTED' }
+                });
                 if (careLink) callerName = careLink.relationship_label || "Caregiver";
             }
         }
 
-        // 1. In-app Socket.io ring
         const io = req.app.get('io');
         if (io) {
             io.to(receiver_id).emit('incomingCall', {
@@ -85,10 +91,9 @@ exports.initiateCall = async (req, res, next) => {
             });
         }
 
-        // 2. High-priority FCM Push (Wakes up closed or backgrounded app)
-        const receiver = await prisma.useraccount.findUnique({ where: { id: receiver_id } });
-        if (receiver && receiver.fcm_token) {
-            await sendCallPushNotification(receiver.fcm_token, {
+        if (receiver.fcm_token) {
+            // Un-awaited to prevent blocking the HTTP response
+            sendCallPushNotification(receiver.fcm_token, {
                 call_id: callSession.id,
                 caller_id: callerId,
                 caller_name: callerName,
@@ -96,7 +101,7 @@ exports.initiateCall = async (req, res, next) => {
                 channelName,
                 token,
                 appId
-            });
+            }).catch(console.error);
         }
 
         return res.status(201).json({ status: 'success', data: { ...callSession, token, appId } });
@@ -153,6 +158,14 @@ exports.updateCallStatus = async (req, res, next) => {
                 ended_at: ['COMPLETED', 'REJECTED', 'MISSED'].includes(status) ? new Date() : undefined
             }
         });
+
+        // If caller hangs up before answering, tell the receiver's phone to stop ringing
+        if (call.status === 'INITIATED' && ['COMPLETED', 'MISSED', 'REJECTED'].includes(status)) {
+            const receiver = await prisma.useraccount.findUnique({ where: { id: call.receiver_id } });
+            if (receiver && receiver.fcm_token) {
+                sendCallCancelledPush(receiver.fcm_token, id).catch(console.error);
+            }
+        }
 
         const io = req.app.get('io');
         if (io) {

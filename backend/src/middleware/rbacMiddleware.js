@@ -1,64 +1,58 @@
-const prisma = require('../config/db');
-const { isCentralCounsellor, verifyPatientDataEventAccess } = require('../services/authorizationService');
+const { isUuid } = require('../utils/validators');
+const { getPatientAccessContext, isCentralCounsellor } = require('../services/authorizationService');
 
+/**
+ * Patient-scoped access guard. ALL rules live in authorizationService; this
+ * file only translates the result into HTTP + req.accessContext.
+ *
+ *   Central NGO head/counsellor -> global patient access (role STAFF)
+ *   Patient (SELF/DELEGATE)     -> own / delegated patient access (role PATIENT)
+ *   Caregiver                   -> GRANTED link + access_scopes (role CAREGIVER)
+ */
 const requirePatientAccess = (requiredScope = null) => {
     return async (req, res, next) => {
         try {
-            const patientId = req.params.patient_id || req.body.patient_id || req.query.patient_id;
+            const patientId = req.params?.patient_id || req.body?.patient_id || req.query?.patient_id;
             const userId = req.user.userId;
 
             if (!patientId) {
                 return res.status(400).json({ status: 'error', message: 'patient_id is required for access check.' });
             }
+            if (!isUuid(patientId)) {
+                return res.status(400).json({ status: 'error', message: 'patient_id must be a valid UUID.' });
+            }
 
-            // 1. Verify access using the unified service
-            const hasAccess = await verifyPatientDataEventAccess(userId, patientId);
-            if (!hasAccess) {
+            const ctx = await getPatientAccessContext(userId, patientId);
+            if (!ctx) {
                 return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
             }
 
-            // 2. Populate req.accessContext for controllers expecting role and link metadata
-            const accountLink = await prisma.patientaccountlink.findFirst({
-                where: { user_id: userId, patient_id: patientId, consent_status: 'GRANTED' }
-            });
-
-            if (accountLink) {
-                req.accessContext = { role: 'PATIENT', link: accountLink };
-                return next();
-            }
-
-            const caregiverLink = await prisma.patientcaregiverlink.findFirst({
-                where: { caregiver_user_id: userId, patient_id: patientId, consent_status: 'GRANTED' }
-            });
-
-            if (caregiverLink) {
-                const scopes = caregiverLink.access_scopes || [];
-                if (requiredScope && !scopes.includes('ALL') && !scopes.includes(requiredScope)) {
+            if (ctx.role === 'CAREGIVER' && requiredScope) {
+                const scopes = Array.isArray(ctx.link.access_scopes) ? ctx.link.access_scopes : [];
+                if (!scopes.includes('ALL') && !scopes.includes(requiredScope)) {
                     return res.status(403).json({ status: 'error', message: `Access denied. Requires scope: ${requiredScope}` });
                 }
-                req.accessContext = { role: 'CAREGIVER', link: caregiverLink };
-                return next();
             }
 
-            const isCentral = await isCentralCounsellor(userId);
-            const staffAssignment = await prisma.staffassignment.findFirst({
-                where: { staff_user_id: userId, patient_id: patientId, status: 'ACTIVE' }
-            });
-
-            if (isCentral || staffAssignment) {
-                req.accessContext = { 
-                    role: 'STAFF', 
-                    link: staffAssignment || { staff_user_id: userId, role: 'COUNSELLOR' } 
-                };
-                return next();
-            }
-
-            req.accessContext = { role: 'PATIENT', link: null };
+            req.accessContext = ctx;
             next();
-        } catch (error) { 
-            next(error); 
+        } catch (error) {
+            next(error);
         }
     };
 };
 
+// Guard for the NGO web admin API: only the single central NGO head/counsellor.
+const requireCentralCounsellor = async (req, res, next) => {
+    try {
+        if (!(await isCentralCounsellor(req.user.userId))) {
+            return res.status(403).json({ status: 'error', message: 'Only the central NGO head/counsellor can access this resource.' });
+        }
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = requirePatientAccess;
+module.exports.requireCentralCounsellor = requireCentralCounsellor;

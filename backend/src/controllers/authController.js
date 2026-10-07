@@ -3,21 +3,54 @@ const argon2 = require('argon2');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const transporter = require('../config/mailer');
+const { isCentralCounsellor } = require('../services/authorizationService');
+const { isUuid } = require('../utils/validators');
 
+// STAFF now means exactly one thing: the central NGO head/counsellor (same rule the whole
+// backend uses for authorization). Per-patient staffassignment rows grant nothing.
 const getUserRoles = async (userId) => {
     const roles = [];
-    const isStaff = await prisma.staffassignment.findFirst({ where: { staff_user_id: userId, status: 'ACTIVE' } });
-    if (isStaff) roles.push('STAFF');
 
-    const isPatient = await prisma.patientaccountlink.findFirst({ 
-        where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] } } 
+    if (await isCentralCounsellor(userId)) roles.push('STAFF');
+
+    const isPatient = await prisma.patientaccountlink.findFirst({
+        where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] }, consent_status: 'GRANTED' }
     });
     if (isPatient) roles.push('PATIENT');
 
-    const isCaregiver = await prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: userId } });
-    if (isCaregiver) roles.push('CAREGIVER');
+    // Caregiver = linked to a patient OR registered caregiver profile
+    const [isCaregiverLink, hasCaregiverProfile] = await Promise.all([
+        prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: userId, consent_status: 'GRANTED' } }),
+        prisma.caregiverprofile.findUnique({ where: { user_id: userId } })
+    ]);
+    if (isCaregiverLink || hasCaregiverProfile) roles.push('CAREGIVER');
 
     return roles.length > 0 ? roles : ['NEW_USER'];
+};
+
+// ONE definition of "profile completed", used by verify-otp, /me and PATCH /profile.
+const isProfileCompleted = (user) => Boolean(user && typeof user.full_name === 'string' && user.full_name.trim().length > 0);
+
+// ONE user shape for verify-otp, /me and PATCH /profile (never leaks fcm_token).
+const USER_SELECT = {
+    id: true,
+    email: true,
+    full_name: true,
+    date_of_birth: true,
+    avatar_url: true,
+    phone_number: true,
+    preferred_language: true,
+    status: true,
+    created_at: true,
+    updated_at: true,
+    caregiverprofile: true
+};
+
+const buildUserPayload = async (userId) => {
+    const user = await prisma.useraccount.findUnique({ where: { id: userId }, select: USER_SELECT });
+    if (!user) return null;
+    const roles = await getUserRoles(userId);
+    return { ...user, roles, is_profile_completed: isProfileCompleted(user) };
 };
 
 const generateRefreshToken = async (userId) => {
@@ -35,7 +68,7 @@ const generateRefreshToken = async (userId) => {
 exports.requestOtp = async (req, res, next) => {
     try {
         const { email } = req.body;
-        if (!email) return res.status(400).json({ status: 'error', message: 'Email is required' });
+        if (!email) return res.status(400).json({ status: 'error', message: 'Email is required.' });
 
         const cleanEmail = email.trim().toLowerCase();
         const rawOtp = crypto.randomInt(100000, 1000000).toString();
@@ -55,19 +88,19 @@ exports.requestOtp = async (req, res, next) => {
                 text: `Your OTP code is: ${rawOtp}\n\nIt will expire in 10 minutes.`
             });
             console.log(`[EMAIL SENT] OTP sent to ${cleanEmail}`);
+            return res.status(200).json({ status: 'success', message: 'OTP sent successfully.' });
         } catch (err) {
             console.error('[EMAIL ERROR] Failed to send OTP email:', err);
-            console.log(`\n[MOCK FALLBACK] To: ${cleanEmail} | OTP: ${rawOtp}\n`);
+            // Strict failure: No console fallback allowed in production.
+            return res.status(500).json({ status: 'error', message: 'Failed to send verification email. Please try again later.' });
         }
-        
-        return res.status(200).json({ status: 'success', message: 'OTP generated' });
     } catch (error) { next(error); }
 };
 
 exports.verifyOtp = async (req, res, next) => {
     try {
         const { email, otp } = req.body;
-        if (!email || !otp) return res.status(400).json({ status: 'error', message: 'Email and OTP required' });
+        if (!email || !otp) return res.status(400).json({ status: 'error', message: 'Email and OTP required.' });
 
         const cleanEmail = email.trim().toLowerCase();
 
@@ -76,7 +109,7 @@ exports.verifyOtp = async (req, res, next) => {
             orderBy: { created_at: 'desc' }
         });
 
-        if (!otpRecord) return res.status(401).json({ status: 'error', message: 'No pending OTP' });
+        if (!otpRecord) return res.status(401).json({ status: 'error', message: 'No pending OTP.' });
 
         if (otpRecord.attempts_count >= 5) {
             await prisma.authotp.delete({ where: { id: otpRecord.id } });
@@ -85,7 +118,7 @@ exports.verifyOtp = async (req, res, next) => {
 
         if (new Date() > otpRecord.expires_at) {
             await prisma.authotp.delete({ where: { id: otpRecord.id } });
-            return res.status(401).json({ status: 'error', message: 'OTP expired' });
+            return res.status(401).json({ status: 'error', message: 'OTP expired.' });
         }
 
         const isValid = await argon2.verify(otpRecord.otp_hash, otp.toString().trim());
@@ -94,54 +127,33 @@ exports.verifyOtp = async (req, res, next) => {
                 where: { id: otpRecord.id },
                 data: { attempts_count: { increment: 1 } }
             });
-            return res.status(401).json({ status: 'error', message: 'Invalid OTP' });
+            return res.status(401).json({ status: 'error', message: 'Invalid OTP.' });
         }
 
         await prisma.authotp.delete({ where: { id: otpRecord.id } });
 
-        let user = await prisma.useraccount.findUnique({ where: { email: cleanEmail } });
-        if (!user) user = await prisma.useraccount.create({ data: { email: cleanEmail } });
+        let user = await prisma.useraccount.findUnique({ where: { email: cleanEmail }, select: { id: true, email: true } });
+        if (!user) user = await prisma.useraccount.create({ data: { email: cleanEmail }, select: { id: true, email: true } });
 
-        const roles = await getUserRoles(user.id);
-        const isProfileCompleted = !!user.full_name;
+        const userPayload = await buildUserPayload(user.id);
         const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
         const refreshToken = await generateRefreshToken(user.id);
-        
-        return res.status(200).json({ 
-            status: 'success', 
-            token, 
-            refresh_token: refreshToken, 
-            user: { ...user, roles, is_profile_completed: isProfileCompleted } 
+
+        return res.status(200).json({
+            status: 'success',
+            token,
+            refresh_token: refreshToken,
+            user: userPayload
         });
     } catch (error) { next(error); }
 };
 
 exports.getMe = async (req, res, next) => {
     try {
-        const user = await prisma.useraccount.findUnique({
-            where: { id: req.user.userId },
-            select: { 
-                id: true, 
-                email: true, 
-                full_name: true,
-                date_of_birth: true,
-                avatar_url: true,
-                phone_number: true, 
-                preferred_language: true, 
-                status: true, 
-                created_at: true,
-                caregiverprofile: true
-            }
-        });
-        if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-        
-        const roles = await getUserRoles(user.id);
-        const isProfileCompleted = !!user.full_name;
+        const payload = await buildUserPayload(req.user.userId);
+        if (!payload) return res.status(404).json({ status: 'error', message: 'User not found.' });
 
-        return res.status(200).json({ 
-            status: 'success', 
-            data: { ...user, roles, is_profile_completed: isProfileCompleted } 
-        });
+        return res.status(200).json({ status: 'success', data: payload });
     } catch (error) { next(error); }
 };
 
@@ -151,27 +163,40 @@ exports.updateProfile = async (req, res, next) => {
         const { full_name, date_of_birth, phone_number, preferred_language, caregiver_type } = req.body;
 
         const updateData = {};
-        if (full_name !== undefined) updateData.full_name = full_name.trim();
-        if (date_of_birth !== undefined) updateData.date_of_birth = new Date(date_of_birth);
-        if (phone_number !== undefined) updateData.phone_number = phone_number.trim();
-        if (preferred_language !== undefined) updateData.preferred_language = preferred_language;
 
-        const updatedUser = await prisma.useraccount.update({
-            where: { id: userId },
-            data: updateData,
-            select: {
-                id: true,
-                email: true,
-                full_name: true,
-                date_of_birth: true,
-                phone_number: true,
-                avatar_url: true,
-                preferred_language: true,
-                status: true
+        if (full_name !== undefined) {
+            if (typeof full_name !== 'string' || full_name.trim() === '') {
+                return res.status(400).json({ status: 'error', message: 'full_name cannot be empty.' });
             }
-        });
+            updateData.full_name = full_name.trim().slice(0, 255);
+        }
+        if (date_of_birth !== undefined) {
+            const dob = new Date(date_of_birth);
+            if (Number.isNaN(dob.getTime())) {
+                return res.status(400).json({ status: 'error', message: 'date_of_birth is not a valid date.' });
+            }
+            updateData.date_of_birth = dob;
+        }
+        if (phone_number !== undefined) {
+            updateData.phone_number = (typeof phone_number === 'string' && phone_number.trim() !== '')
+                ? phone_number.trim().slice(0, 32)
+                : null;
+        }
+        if (preferred_language !== undefined) {
+            if (typeof preferred_language !== 'string' || preferred_language.trim() === '') {
+                return res.status(400).json({ status: 'error', message: 'preferred_language is invalid.' });
+            }
+            updateData.preferred_language = preferred_language.trim().slice(0, 10);
+        }
+        if (caregiver_type !== undefined && !['FAMILY', 'VOLUNTEER'].includes(caregiver_type)) {
+            return res.status(400).json({ status: 'error', message: 'caregiver_type must be FAMILY or VOLUNTEER.' });
+        }
 
-        if (caregiver_type && ['FAMILY', 'VOLUNTEER'].includes(caregiver_type)) {
+        if (Object.keys(updateData).length > 0) {
+            await prisma.useraccount.update({ where: { id: userId }, data: updateData });
+        }
+
+        if (caregiver_type) {
             await prisma.caregiverprofile.upsert({
                 where: { user_id: userId },
                 update: { caregiver_type },
@@ -183,12 +208,13 @@ exports.updateProfile = async (req, res, next) => {
             });
         }
 
-        const roles = await getUserRoles(userId);
+        const payload = await buildUserPayload(userId);
+        if (!payload) return res.status(404).json({ status: 'error', message: 'User not found.' });
 
         return res.status(200).json({
             status: 'success',
             message: 'Profile updated successfully.',
-            data: { ...updatedUser, roles, is_profile_completed: !!updatedUser.full_name }
+            data: payload
         });
     } catch (error) { next(error); }
 };
@@ -196,10 +222,11 @@ exports.updateProfile = async (req, res, next) => {
 exports.refreshToken = async (req, res, next) => {
     try {
         const { refresh_token } = req.body;
-        if (!refresh_token) return res.status(401).json({ status: 'error', message: 'Refresh token required' });
+        if (!refresh_token) return res.status(401).json({ status: 'error', message: 'Refresh token required.' });
 
+        if (typeof refresh_token !== 'string') return res.status(401).json({ status: 'error', message: 'Invalid format.' });
         const [userId, rawString] = refresh_token.split('.');
-        if (!userId || !rawString) return res.status(401).json({ status: 'error', message: 'Invalid format' });
+        if (!userId || !rawString || !isUuid(userId)) return res.status(401).json({ status: 'error', message: 'Invalid format.' });
 
         const tokens = await prisma.refreshtoken.findMany({
             where: { user_id: userId, revoked: false, expires_at: { gt: new Date() } }
@@ -217,7 +244,8 @@ exports.refreshToken = async (req, res, next) => {
 
         await prisma.refreshtoken.update({ where: { id: validDbToken.id }, data: { revoked: true } });
         const user = await prisma.useraccount.findUnique({ where: { id: userId } });
-        
+        if (!user) return res.status(401).json({ status: 'error', message: 'Invalid or expired refresh token.' });
+
         const newAccessToken = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
         const newRefreshToken = await generateRefreshToken(user.id);
 
@@ -240,7 +268,14 @@ exports.logout = async (req, res, next) => {
                 }
             }
         }
-        return res.status(200).json({ status: 'success', message: 'Logged out successfully' });
+        
+        // Remove FCM token to stop ringing this device after logout
+        await prisma.useraccount.update({
+            where: { id: req.user.userId },
+            data: { fcm_token: null }
+        });
+        
+        return res.status(200).json({ status: 'success', message: 'Logged out successfully.' });
     } catch (error) { next(error); }
 };
 
@@ -251,6 +286,13 @@ exports.updateFcmToken = async (req, res, next) => {
 
         if (!fcm_token) return res.status(400).json({ status: 'error', message: 'fcm_token is required.' });
 
+        // Wipe this token from any other user who might have logged in previously on this device
+        await prisma.useraccount.updateMany({
+            where: { fcm_token, NOT: { id: userId } },
+            data: { fcm_token: null }
+        });
+
+        // Assign to current user
         await prisma.useraccount.update({
             where: { id: userId },
             data: { fcm_token }

@@ -12,6 +12,8 @@ const caregiverRoutes = require('./routes/caregiverRoutes');
 const communityRoutes = require('./routes/communityRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const callRoutes = require('./routes/callRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const HttpError = require('./utils/httpError');
 
 const app = express();
 
@@ -41,12 +43,29 @@ app.use('/api/caregivers', caregiverRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/calls', callRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'success', message: 'Saathi API is running' });
 });
 
 app.use((err, req, res, next) => {
+  // Deliberate client errors (e.g. thrown inside a transaction so it rolls back)
+  if (err instanceof HttpError) {
+    return res.status(err.status).json({ status: 'error', message: err.message, ...(err.code ? { code: err.code } : {}) });
+  }
+  // Upload limits (file too large, too many files, unexpected field)
+  if (err && err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'File is too large.'
+      : err.code === 'LIMIT_UNEXPECTED_FILE' ? 'Too many files, or an unexpected file field.'
+      : `Upload error: ${err.message}`;
+    return res.status(status).json({ status: 'error', message });
+  }
+  // Malformed JSON body
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ status: 'error', message: 'Malformed JSON body.' });
+  }
   console.error(err.stack);
   res.status(500).json({ status: 'error', message: 'Internal Server Error' });
 });

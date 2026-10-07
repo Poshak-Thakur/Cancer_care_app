@@ -1,25 +1,35 @@
 const prisma = require('../config/db');
+const { getISTDayBoundaries } = require('../utils/timezoneHelper');
+const { getPatientAccessContext } = require('../services/authorizationService');
 
 exports.getDashboardOverview = async (req, res, next) => {
     try {
         const { patient_id } = req.params;
-        
+
+        // requirePatientAccess() normally fills req.accessContext. Resolve it here too (defence in
+        // depth) so the central NGO head/counsellor can ALWAYS read any dashboard without a
+        // staffassignment row, and nobody else can slip through if the route guard is ever removed.
+        let accessContext = req.accessContext;
+        if (!accessContext) {
+            accessContext = await getPatientAccessContext(req.user.userId, patient_id);
+            if (!accessContext) {
+                return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
+            }
+        }
+
         const patient = await prisma.patient.findUnique({
             where: { id: patient_id },
             select: { full_name: true, date_of_birth: true, preferred_language: true, cancer_type: true, cancer_stage: true, diagnosis_date: true }
         });
         if (!patient) return res.status(404).json({ status: 'error', message: 'Patient not found' });
 
-        const role = req.accessContext?.role || 'PATIENT';
-        const link = req.accessContext?.link;
+        const role = accessContext.role;
+        const link = accessContext.link;
         const accessScopes = link?.access_scopes || ['ALL'];
         const relationship = link?.relationship_label || link?.relationship_type || role;
 
-        // Ensure we fetch from midnight to midnight for the "Today" view
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
+        // NEW: Fetch from IST midnight to IST midnight
+        const { startOfDay, endOfDay } = getISTDayBoundaries();
 
         const [careEvents, todayCheckIn, alerts, recentDocuments] = await Promise.all([
             prisma.careevent.findMany({
@@ -30,7 +40,6 @@ exports.getDashboardOverview = async (req, res, next) => {
             prisma.symptomevent.findFirst({
                 where: { patient_id: patient_id, recorded_at: { gte: startOfDay, lte: endOfDay }, source: 'ROUTINE' },
                 orderBy: { recorded_at: 'desc' },
-                // NEW: Include the dynamic fields we just built for the Check-In feature
                 include: { symptomobservation: true } 
             }),
             prisma.alert.findMany({
@@ -42,7 +51,6 @@ exports.getDashboardOverview = async (req, res, next) => {
                 where: { patient_id: patient_id },
                 orderBy: { uploaded_at: 'desc' },
                 take: 3,
-                // NEW: Added verification_status so the UI can show OCR pending states
                 select: { id: true, title: true, document_type: true, uploaded_at: true, verification_status: true }
             })
         ]);

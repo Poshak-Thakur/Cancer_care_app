@@ -18,10 +18,6 @@ try {
     console.error('❌ Failed to initialize Firebase Admin SDK:', error.message);
 }
 
-/**
- * High-priority push to wake the phone and trigger the ring screen.
- * Always fires regardless of general notification toggles.
- */
 exports.sendCallPushNotification = async (fcmToken, callData) => {
     if (!fcmToken || !isInitialized) return;
     try {
@@ -52,10 +48,21 @@ exports.sendCallPushNotification = async (fcmToken, callData) => {
     }
 };
 
-/**
- * Standard priority push notification for incoming chat messages.
- * Only sends if recipient has notifications enabled.
- */
+// NEW: Tells the receiver's phone to stop ringing if the caller hangs up
+exports.sendCallCancelledPush = async (fcmToken, callId) => {
+    if (!fcmToken || !isInitialized) return;
+    try {
+        await getMessaging().send({
+            token: fcmToken,
+            data: { type: 'CALL_CANCELLED', call_id: String(callId) },
+            android: { priority: 'high', ttl: 60 * 1000 }
+        });
+        console.log(`[FCM] Sent CALL_CANCELLED to device.`);
+    } catch (err) { 
+        console.error('[FCM] Error sending call cancel:', err.message); 
+    }
+};
+
 exports.sendMessagePushNotification = async (fcmToken, { title, body, conversationId, senderId }) => {
     if (!fcmToken || !isInitialized) return;
     try {
@@ -71,8 +78,8 @@ exports.sendMessagePushNotification = async (fcmToken, { title, body, conversati
                 sender_id: String(senderId)
             },
             android: {
-                priority: 'normal', // Normal priority respects OS quiet hours/do-not-disturb
-                notification: { sound: 'default', channelId: 'chat_messages' }
+                priority: 'normal',
+                notification: { sound: 'default' } // channelId removed so OS defaults work safely
             },
             apns: {
                 payload: { aps: { sound: 'default' } }
@@ -84,10 +91,6 @@ exports.sendMessagePushNotification = async (fcmToken, { title, body, conversati
     }
 };
 
-/**
- * Critical emergency push for worsening symptoms or SOS alerts.
- * Always fires regardless of general notification toggles.
- */
 exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId, patientId }) => {
     if (!fcmToken || !isInitialized) return;
     try {
@@ -104,7 +107,7 @@ exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId
             },
             android: {
                 priority: 'high',
-                notification: { sound: 'default', channelId: 'emergency_alerts', priority: 'max' }
+                notification: { sound: 'default' } // channelId removed so OS defaults work safely
             }
         });
         console.log(`[FCM] Sent CRITICAL_ALERT notification to device.`);

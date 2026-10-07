@@ -197,6 +197,8 @@ model patientaccountlink {
 
   @@unique([user_id, patient_id], map: "uq_user_patient_link")
   @@index([user_id, patient_id], map: "idx_account_link_lookup")
+  @@index([patient_id, consent_status], map: "idx_account_link_patient_consent")
+  @@index([user_id, consent_status], map: "idx_account_link_user_consent")
 }
 
 model patientcaregiverlink {
@@ -395,6 +397,7 @@ model communitypost {
   postlike           postlike[]
   postcomment        postcomment[]
   polloption         polloption[]
+  pollvote           pollvote[]
 
   @@index([status, visibility], map: "idx_post_moderation")
 }
@@ -432,15 +435,19 @@ model polloption {
 }
 
 model pollvote {
-  id            String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  polloption_id String     @db.Uuid
-  user_id       String     @db.Uuid
-  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  polloption_id String        @db.Uuid
+  // Denormalised poll (post) id so the database itself enforces ONE vote per user per poll.
+  post_id       String        @db.Uuid
+  user_id       String        @db.Uuid
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
   
-  option        polloption @relation(fields: [polloption_id], references: [id], onDelete: Cascade)
-  user          useraccount @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  option        polloption    @relation(fields: [polloption_id], references: [id], onDelete: Cascade)
+  post          communitypost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user          useraccount   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([polloption_id, user_id]) 
+  @@unique([polloption_id, user_id])
+  @@unique([post_id, user_id], map: "uq_pollvote_post_user")
 }
 
 model chatconversation {
@@ -457,6 +464,9 @@ model chatconversation {
   @@index([patient_id], map: "idx_chat_patient")
   @@index([participant_one_id], map: "idx_chat_participant_one")
   @@index([participant_two_id], map: "idx_chat_participant_two")
+  // Conversation reuse looks up (A,B,patient) in BOTH participant orders
+  @@index([participant_one_id, participant_two_id, patient_id], map: "idx_chat_pair_patient")
+  @@index([participant_two_id, participant_one_id, patient_id], map: "idx_chat_pair_patient_rev")
 }
 
 model chatmessage {
