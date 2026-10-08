@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:http_parser/http_parser.dart' show MediaType;
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/api_exception.dart';
@@ -15,6 +16,7 @@ class MediaUploadService {
       fileBytes: bytes,
       filename: name,
       fileField: 'audio', // the field name multer expects on /api/chat/upload-audio
+      contentType: MediaType('audio', 'mp4'), // .m4a (AAC); without it the server stores octet-stream
     );
     final url = (res['data'] as Map?)?['media_url'] as String?;
     if (url == null || url.isEmpty) {

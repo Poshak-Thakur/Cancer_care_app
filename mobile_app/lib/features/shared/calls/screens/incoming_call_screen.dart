@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../core/localization/strings.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/realtime/socket_service.dart';
@@ -26,7 +27,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   Timer? _giveUp;
   bool _busy = false;
 
-  String get _callerName => ContactDirectory.nameFor(widget.call.callerId) ?? S.t('careTeamMember');
+  Timer? _buzz;
+
+  String get _callerName => widget.call.callerName.isNotEmpty
+      ? widget.call.callerName
+      : (ContactDirectory.nameFor(widget.call.callerId) ?? S.t('careTeamMember'));
 
   @override
   void initState() {
@@ -39,6 +44,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       }
     });
     _giveUp = Timer(const Duration(seconds: 60), () => _close(note: S.t('callMissed')));
+    // Fallback ringing (the system call screen is used first): vibrate and beep.
+    _buzz = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      HapticFeedback.vibrate();
+      SystemSound.play(SystemSoundType.alert);
+    });
   }
 
   @override
@@ -46,6 +56,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     IncomingCallScreen.ringingCallId = null;
     _sub?.cancel();
     _giveUp?.cancel();
+    _buzz?.cancel();
     super.dispose();
   }
 

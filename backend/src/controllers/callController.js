@@ -61,18 +61,19 @@ exports.initiateCall = async (req, res, next) => {
         });
 
         let callerName = "Saathi User";
-        if (await isCentralCounsellor(callerId)) {
+        const callerIsCentral = await isCentralCounsellor(callerId);
+        if (callerIsCentral) {
             callerName = "NGO Counsellor";
         } else {
             const patientLink = await prisma.patientaccountlink.findFirst({
-                where: { user_id: callerId, consent_status: 'GRANTED' },
+                where: { user_id: callerId, consent_status: 'GRANTED', revoked_at: null },
                 include: { patient: true }
             });
             if (patientLink?.patient?.full_name) {
                 callerName = patientLink.patient.full_name;
             } else {
                 const careLink = await prisma.patientcaregiverlink.findFirst({
-                    where: { caregiver_user_id: callerId, consent_status: 'GRANTED' }
+                    where: { caregiver_user_id: callerId, consent_status: 'GRANTED', revoked_at: null }
                 });
                 if (careLink) callerName = careLink.relationship_label || "Caregiver";
             }
@@ -92,11 +93,14 @@ exports.initiateCall = async (req, res, next) => {
         }
 
         if (receiver.fcm_token) {
+            // PRIVACY: the FCM payload (lock screen / push infrastructure) never carries a patient's name.
+            // The real caller_name is still delivered over the authenticated socket above.
+            const pushCallerName = callerIsCentral ? 'NGO Counsellor' : 'Saathi care circle';
             // Un-awaited to prevent blocking the HTTP response
             sendCallPushNotification(receiver.fcm_token, {
                 call_id: callSession.id,
                 caller_id: callerId,
-                caller_name: callerName,
+                caller_name: pushCallerName,
                 call_type,
                 channelName,
                 token,
@@ -120,7 +124,13 @@ exports.getIncomingCalls = async (req, res, next) => {
             include: { caller: { select: { id: true, email: true, full_name: true } } },
             orderBy: { created_at: 'desc' }
         });
-        return res.status(200).json({ status: 'success', data: incomingCalls });
+
+        // Don't surface a ringing call if the relationship was revoked after it was placed.
+        const stillValid = [];
+        for (const call of incomingCalls) {
+            if (await verifyCommunicationAccess(call.caller_id, userId, call.patient_id)) stillValid.push(call);
+        }
+        return res.status(200).json({ status: 'success', data: stillValid });
     } catch (error) { next(error); }
 };
 
@@ -135,6 +145,8 @@ exports.updateCallStatus = async (req, res, next) => {
             return res.status(400).json({ status: 'error', message: 'Invalid call status.' });
         }
 
+        if (!isUuid(id)) return res.status(400).json({ status: 'error', message: 'Invalid call id.' });
+
         const call = await prisma.callsession.findUnique({ where: { id } });
         if (!call) return res.status(404).json({ status: 'error', message: 'Call not found' });
 
@@ -148,6 +160,16 @@ exports.updateCallStatus = async (req, res, next) => {
 
         if (['ONGOING', 'REJECTED'].includes(status) && userId !== call.receiver_id) {
             return res.status(403).json({ status: 'error', message: 'Only the receiver can accept or reject an incoming call.' });
+        }
+
+        // Accepting (joining) a call requires CURRENT authorization for the call's patient context.
+        // Hanging up / rejecting / marking missed is always allowed so a revoked user can never
+        // leave a call stuck open.
+        if (status === 'ONGOING') {
+            const stillAuthorized = await verifyCommunicationAccess(call.caller_id, call.receiver_id, call.patient_id);
+            if (!stillAuthorized) {
+                return res.status(403).json({ status: 'error', message: 'You are no longer authorized to join this call.' });
+            }
         }
 
         const updatedCall = await prisma.callsession.update({

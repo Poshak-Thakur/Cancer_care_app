@@ -1,11 +1,20 @@
 const prisma = require('../config/db');
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
-const { canManagePatientCaregivers } = require('../services/authorizationService');
-const { isUuid } = require('../utils/validators');
+const {
+    canManagePatientCaregivers,
+    ACTIVE_LINK
+} = require('../services/authorizationService');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
+const { isUuid, normalizeLabel } = require('../utils/validators');
+const { DEFAULT_CAREGIVER_SCOPES } = require('../constants/accessScopes');
 const HttpError = require('../utils/httpError');
 
 const CAREGIVER_TYPES = ['FAMILY', 'VOLUNTEER'];
+
+// NGO recognition can only be changed through PATCH /api/admin/caregivers/:user_id/recognition.
+// A caregiver client must never be able to send any of these.
+const RECOGNITION_FIELDS = ['recognized', 'ngo_recognition_status', 'recognized_by', 'recognized_at'];
 
 // Initialize Supabase for avatar uploads
 const supabase = (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY))
@@ -20,6 +29,15 @@ exports.upsertProfile = async (req, res, next) => {
     try {
         const userId = req.user.userId;
         const { full_name, caregiver_type } = req.body;
+
+        const forbidden = RECOGNITION_FIELDS.filter((f) => Object.prototype.hasOwnProperty.call(req.body, f));
+        if (forbidden.length > 0) {
+            return res.status(403).json({
+                status: 'error',
+                code: 'RECOGNITION_NOT_CLIENT_SETTABLE',
+                message: 'NGO recognition can only be set by the NGO.'
+            });
+        }
 
         if (typeof full_name !== 'string' || full_name.trim() === '') {
             return res.status(400).json({ status: 'error', message: 'full_name is required.' });
@@ -53,8 +71,10 @@ exports.upsertProfile = async (req, res, next) => {
                 data: {
                     user_id: userId,
                     caregiver_type,
-                    // Same rule as PATCH /auth/profile: families are auto-approved, volunteers are vetted.
-                    volunteer_status: caregiver_type === 'VOLUNTEER' ? 'PENDING' : 'APPROVED'
+                    // Every new caregiver starts unrecognised, FAMILY and VOLUNTEER alike.
+                    ngo_recognition_status: 'NOT_RECOGNIZED',
+                    recognized_by: null,
+                    recognized_at: null
                 }
             });
 
@@ -168,9 +188,13 @@ exports.acceptInvite = async (req, res, next) => {
         }
         const inviteCode = tokenToVerify.trim().toUpperCase();
 
+        const checkedLabel = normalizeLabel(relationship_label, 'Caregiver');
+        if (checkedLabel.error) return res.status(400).json({ status: 'error', message: checkedLabel.error });
+        const label = checkedLabel.value;
+
         // Caregiver onboarding (type selection) must be completed first. We never
-        // auto-create a FAMILY profile here, otherwise a VOLUNTEER-to-be would be
-        // silently converted into a FAMILY caregiver.
+        // auto-create a profile here, otherwise a VOLUNTEER-to-be would be silently
+        // converted into a FAMILY caregiver.
         const profile = await prisma.caregiverprofile.findUnique({ where: { user_id: userId } });
         if (!profile) {
             return res.status(409).json({
@@ -179,13 +203,24 @@ exports.acceptInvite = async (req, res, next) => {
                 message: 'Complete caregiver onboarding (choose FAMILY or VOLUNTEER via POST /api/caregivers/profile) before accepting an invite.'
             });
         }
+        // Recognition gate: checked BEFORE the invite is touched, so an unrecognised caregiver
+        // cannot burn a patient's invite code.
+        if (profile.ngo_recognition_status !== 'RECOGNIZED') {
+            return res.status(403).json({
+                status: 'error',
+                code: 'CAREGIVER_NOT_RECOGNIZED',
+                message: 'Caregiver recognition by the NGO is required before linking to a patient.'
+            });
+        }
 
-        const label = (typeof relationship_label === 'string' && relationship_label.trim())
-            ? relationship_label.trim().slice(0, 100)
-            : 'Caregiver';
-
-        // Consuming the invite and creating/updating the link succeed or fail TOGETHER.
+        // Consuming the invite and creating/restoring the link succeed or fail TOGETHER.
         const link = await prisma.$transaction(async (tx) => {
+            // Re-check inside the transaction: recognition may have been withdrawn a moment ago.
+            const freshProfile = await tx.caregiverprofile.findUnique({ where: { user_id: userId } });
+            if (!freshProfile || freshProfile.ngo_recognition_status !== 'RECOGNIZED') {
+                throw new HttpError(403, 'Caregiver recognition by the NGO is required before linking to a patient.', 'CAREGIVER_NOT_RECOGNIZED');
+            }
+
             const invite = await tx.caregiverinvite.findUnique({ where: { code: inviteCode } });
             if (!invite || invite.is_used || invite.expires_at < new Date()) {
                 throw new HttpError(400, 'Invalid or expired invite code.');
@@ -200,7 +235,18 @@ exports.acceptInvite = async (req, res, next) => {
                 throw new HttpError(400, 'Invalid or expired invite code.');
             }
 
-            return tx.patientcaregiverlink.upsert({
+            const existing = await tx.patientcaregiverlink.findUnique({
+                where: { patient_id_caregiver_user_id: { patient_id: invite.patient_id, caregiver_user_id: userId } }
+            });
+
+            // Already ACTIVE caregiver: keep their current scopes (they may have been rescoped).
+            // New or previously REVOKED link: start from the DEFAULT scopes. Old (possibly
+            // elevated) scopes are never restored blindly. Invites carry no scope list, so the
+            // newly granted scopes are the defaults.
+            const isActive = !!existing && existing.consent_status === 'GRANTED' && existing.revoked_at === null;
+            const newScopes = [...DEFAULT_CAREGIVER_SCOPES];
+
+            const saved = await tx.patientcaregiverlink.upsert({
                 where: {
                     patient_id_caregiver_user_id: { patient_id: invite.patient_id, caregiver_user_id: userId }
                 },
@@ -208,17 +254,34 @@ exports.acceptInvite = async (req, res, next) => {
                     consent_status: 'GRANTED',
                     revoked_at: null,
                     relationship_label: label,
-                    availability: 'AVAILABLE'
+                    availability: 'AVAILABLE',
+                    ...(isActive ? {} : { access_scopes: newScopes })
                 },
                 create: {
                     patient_id: invite.patient_id,
                     caregiver_user_id: userId,
                     relationship_label: label,
                     consent_status: 'GRANTED',
-                    availability: 'AVAILABLE'
+                    availability: 'AVAILABLE',
+                    access_scopes: newScopes
                 },
                 include: { patient: true }
             });
+
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.CAREGIVER_LINK_CREATED,
+                targetResource: RESOURCES.CAREGIVER_LINK,
+                targetId: saved.id,
+                targetUserId: userId,
+                patientId: invite.patient_id,
+                scopesBefore: existing ? (Array.isArray(existing.access_scopes) ? existing.access_scopes : []) : [],
+                scopesAfter: isActive ? existing.access_scopes : newScopes,
+                extra: { invite_id: invite.id, relinked: !!existing && !isActive, already_active: isActive },
+                req
+            });
+
+            return saved;
         });
 
         return res.status(200).json({ status: 'success', message: 'Successfully linked to patient.', data: link });
@@ -242,25 +305,47 @@ exports.revokeCaregiver = async (req, res, next) => {
             return res.status(403).json({ status: 'error', message: 'Unauthorized' });
         }
 
-        const link = await prisma.patientcaregiverlink.findUnique({
-            where: { patient_id_caregiver_user_id: { patient_id, caregiver_user_id } }
-        });
-        if (!link) return res.status(404).json({ status: 'error', message: 'Caregiver link not found.' });
+        // Only THIS patient's link changes. The CaregiverProfile (and its NGO recognition) and
+        // the caregiver's links to other patients are untouched.
+        await prisma.$transaction(async (tx) => {
+            const link = await tx.patientcaregiverlink.findFirst({
+                where: { patient_id, caregiver_user_id, ...ACTIVE_LINK }
+            });
+            if (!link) throw new HttpError(404, 'Active caregiver link not found.');
 
-        await prisma.patientcaregiverlink.update({
-            where: { patient_id_caregiver_user_id: { patient_id, caregiver_user_id } },
-            data: { consent_status: 'REVOKED', revoked_at: new Date() }
+            await tx.patientcaregiverlink.update({
+                where: { patient_id_caregiver_user_id: { patient_id, caregiver_user_id } },
+                data: { consent_status: 'REVOKED', revoked_at: new Date() }
+            });
+
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.CAREGIVER_LINK_REVOKED,
+                targetResource: RESOURCES.CAREGIVER_LINK,
+                targetId: link.id,
+                targetUserId: caregiver_user_id,
+                patientId: patient_id,
+                scopesBefore: Array.isArray(link.access_scopes) ? link.access_scopes : [],
+                scopesAfter: [],
+                extra: { self_removal: isSelfRemoval },
+                req
+            });
         });
 
         return res.status(200).json({ status: 'success', message: 'Caregiver access revoked.' });
-    } catch(error) { next(error); }
+    } catch (error) { next(error); }
 };
 
 exports.getMyLinkedPatients = async (req, res, next) => {
     try {
         const userId = req.user.userId;
+        // Active links of a RECOGNIZED caregiver only. An unrecognised caregiver sees no patients.
+        const profile = await prisma.caregiverprofile.findUnique({ where: { user_id: userId } });
+        if (!profile || profile.ngo_recognition_status !== 'RECOGNIZED') {
+            return res.status(200).json({ status: 'success', data: [] });
+        }
         const links = await prisma.patientcaregiverlink.findMany({
-            where: { caregiver_user_id: userId, consent_status: 'GRANTED' },
+            where: { caregiver_user_id: userId, ...ACTIVE_LINK },
             include: { patient: true }
         });
         return res.status(200).json({ status: 'success', data: links });
@@ -272,7 +357,7 @@ exports.getMyLinkedPatients = async (req, res, next) => {
 exports.updateAvailability = async (req, res, next) => {
     try {
         const { patient_id } = req.params;
-        const { availability } = req.body; 
+        const { availability } = req.body;
         const userId = req.user.userId;
 
         const VALID_AVAILABILITY = ['AVAILABLE', 'UNAVAILABLE', 'DO_NOT_DISTURB'];
@@ -280,12 +365,12 @@ exports.updateAvailability = async (req, res, next) => {
             return res.status(400).json({ status: 'error', message: 'Invalid availability status.' });
         }
 
-        const existingLink = await prisma.patientcaregiverlink.findUnique({
-            where: { patient_id_caregiver_user_id: { patient_id: patient_id, caregiver_user_id: userId } }
+        const existingLink = await prisma.patientcaregiverlink.findFirst({
+            where: { patient_id, caregiver_user_id: userId, ...ACTIVE_LINK }
         });
 
         if (!existingLink) {
-            return res.status(404).json({ status: 'error', message: 'No caregiver link found for this patient.' });
+            return res.status(404).json({ status: 'error', message: 'No active caregiver link found for this patient.' });
         }
 
         const updatedLink = await prisma.patientcaregiverlink.update({

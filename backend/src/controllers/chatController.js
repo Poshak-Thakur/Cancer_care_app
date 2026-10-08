@@ -4,7 +4,9 @@ const {
     verifyCommunicationAccess,
     verifyPatientDataEventAccess,
     isCentralCounsellor,
-    getCentralCounsellorUserIds
+    getCentralCounsellorUserIds,
+    listActiveCaregiverLinks,
+    listActiveAccountLinks
 } = require('../services/authorizationService');
 const { isUuid } = require('../utils/validators');
 const { sendMessagePushNotification } = require('../config/firebase');
@@ -65,6 +67,21 @@ exports.uploadAudio = async (req, res, next) => {
     }
 };
 
+// Read access to an existing conversation, re-checked against CURRENT authorization.
+//   - central NGO: always allowed to read its own conversations
+//   - patient-specific thread: the user must still be in that patient's network
+//   - patientless thread: only valid while the other participant is the central NGO
+const canStillAccessConversation = async (userId, conversation) => {
+    if (await isCentralCounsellor(userId)) return true;
+    if (conversation.patient_id) {
+        return verifyPatientDataEventAccess(userId, conversation.patient_id);
+    }
+    const otherId = conversation.participant_one_id === userId
+        ? conversation.participant_two_id
+        : conversation.participant_one_id;
+    return verifyCommunicationAccess(userId, otherId, null);
+};
+
 exports.getContacts = async (req, res, next) => {
     try {
         const { patient_id } = req.params;
@@ -77,21 +94,21 @@ exports.getContacts = async (req, res, next) => {
         const hasAccess = await verifyPatientDataEventAccess(currentUserId, patient_id);
         if (!hasAccess) return res.status(403).json({ status: 'error', message: 'Unauthorized' });
 
-        const [centralUserIds, caregiverLinks, patientLink] = await Promise.all([
+        // Active = consent GRANTED + revoked_at NULL (caregivers must also be NGO-recognised);
+        // all of that lives in the authorization service.
+        const [centralUserIds, caregiverLinks, accountLinks, patient] = await Promise.all([
             getCentralCounsellorUserIds(),
-            prisma.patientcaregiverlink.findMany({
-                where: { patient_id, consent_status: 'GRANTED' }
-            }),
-            prisma.patientaccountlink.findFirst({
-                where: {
-                    patient_id,
-                    relationship_type: { in: ['SELF', 'DELEGATE'] },
-                    consent_status: 'GRANTED'
-                },
-                orderBy: { granted_at: 'asc' },
-                include: { patient: true }
-            })
+            listActiveCaregiverLinks(patient_id),
+            listActiveAccountLinks(patient_id),
+            prisma.patient.findUnique({ where: { id: patient_id }, select: { full_name: true } })
         ]);
+
+        // A patient can have several account holders (SELF + any number of DELEGATEs): return all of them.
+        const holderIds = accountLinks.map((l) => l.user_id);
+        const holders = holderIds.length > 0
+            ? await prisma.useraccount.findMany({ where: { id: { in: holderIds } }, select: { id: true, full_name: true } })
+            : [];
+        const holderName = new Map(holders.map((u) => [u.id, u.full_name]));
 
         // The central NGO head/counsellor is the only NGO contact.
         let contacts = [
@@ -110,19 +127,23 @@ exports.getContacts = async (req, res, next) => {
                 isStaff: false,
                 isPatient: false,
                 initial: (c.relationship_label || 'F').charAt(0).toUpperCase()
-            }))
+            })),
+            ...accountLinks.map(l => {
+                const isSelf = l.relationship_type === 'SELF';
+                const name = isSelf
+                    ? (patient?.full_name || 'Patient')
+                    : (holderName.get(l.user_id) || l.relationship_label || 'Delegate');
+                return {
+                    userId: l.user_id,
+                    displayName: name,
+                    role: isSelf ? 'Patient' : 'Delegate',
+                    isStaff: false,
+                    isPatient: isSelf,
+                    isDelegate: !isSelf,
+                    initial: name.charAt(0).toUpperCase()
+                };
+            })
         ];
-
-        if (patientLink) {
-            contacts.push({
-                userId: patientLink.user_id,
-                displayName: patientLink.patient?.full_name || 'Patient',
-                role: 'Patient',
-                isStaff: false,
-                isPatient: true,
-                initial: (patientLink.patient?.full_name || 'P').charAt(0).toUpperCase()
-            });
-        }
 
         // De-duplicate (a user can be e.g. both central NGO and a caregiver) and drop self.
         const seen = new Set();
@@ -218,7 +239,7 @@ exports.getConversations = async (req, res, next) => {
         };
         if (patientFilter) where.patient_id = patientFilter;
 
-        const conversations = await prisma.chatconversation.findMany({
+        const allConversations = await prisma.chatconversation.findMany({
             where,
             include: {
                 participant_one: { select: { id: true, email: true, full_name: true } },
@@ -226,6 +247,26 @@ exports.getConversations = async (req, res, next) => {
                 messages: { orderBy: { created_at: 'desc' }, take: 1 }
             }
         });
+
+        // Being a participant is NOT enough. Re-check CURRENT authorization before a conversation
+        // (metadata, participants, latest-message preview) is returned, so a revoked caregiver /
+        // delegate no longer sees patient-specific threads. Patientless NGO helpline threads still
+        // work. Decisions are cached per patient so the check runs once per patient, not per thread.
+        const centralCaller = await isCentralCounsellor(userId);
+        const patientDecision = new Map();
+        const conversations = [];
+        for (const conversation of allConversations) {
+            if (centralCaller) { conversations.push(conversation); continue; }
+            if (conversation.patient_id) {
+                if (!patientDecision.has(conversation.patient_id)) {
+                    patientDecision.set(conversation.patient_id, await verifyPatientDataEventAccess(userId, conversation.patient_id));
+                }
+                if (!patientDecision.get(conversation.patient_id)) continue;
+                conversations.push(conversation);
+            } else if (await canStillAccessConversation(userId, conversation)) {
+                conversations.push(conversation);
+            }
+        }
 
         // Most recently active first.
         const activityOf = (c) => new Date(c.messages[0]?.created_at || c.created_at).getTime();
@@ -249,6 +290,12 @@ exports.getMessages = async (req, res, next) => {
 
         if (conversation.participant_one_id !== userId && conversation.participant_two_id !== userId) {
             return res.status(403).json({ status: 'error', message: 'Unauthorized: you are not a participant in this conversation.' });
+        }
+
+        // Being a participant is not enough: access must still be valid TODAY.
+        // A revoked patient/delegate/caregiver loses an already-created conversation immediately.
+        if (!(await canStillAccessConversation(userId, conversation))) {
+            return res.status(403).json({ status: 'error', message: 'You no longer have access to this conversation.' });
         }
 
         const messages = await prisma.chatmessage.findMany({
@@ -292,36 +339,35 @@ exports.sendMessage = async (req, res, next) => {
             return res.status(403).json({ status: 'error', message: 'Unauthorized: you cannot post to a conversation you are not part of.' });
         }
 
+        const recipientId = conversation.participant_one_id === userId
+            ? conversation.participant_two_id
+            : conversation.participant_one_id;
+
+        // Sending needs BOTH sides to be currently authorized for this patient context
+        // (creation-time authorization alone is not enough after a revocation).
+        const stillAuthorized = await verifyCommunicationAccess(userId, recipientId, conversation.patient_id);
+        if (!stillAuthorized) {
+            return res.status(403).json({ status: 'error', message: 'You can no longer send messages in this conversation.' });
+        }
+
         const message = await prisma.chatmessage.create({
             data: { conversation_id, sender_id: userId, message_type, content: content || null, media_url: media_url || null }
         });
-
-        const recipientId = conversation.participant_one_id === userId 
-            ? conversation.participant_two_id 
-            : conversation.participant_one_id;
 
         const io = req.app.get('io');
         if (io) {
             io.to(recipientId).emit('newMessage', message);
         }
 
-        const [recipient, senderAccount] = await Promise.all([
-            prisma.useraccount.findUnique({ where: { id: recipientId } }),
-            prisma.useraccount.findUnique({ where: { id: userId } })
-        ]);
+        const recipient = await prisma.useraccount.findUnique({ where: { id: recipientId } });
 
         if (recipient && recipient.fcm_token) {
-            const senderName = senderAccount?.full_name || senderAccount?.email?.split('@')[0] || 'Care Team';
-            const textPreview = typeof content === 'string' ? content : '';
-            let bodyPreview;
-            if (message_type === 'AUDIO') bodyPreview = '🎤 Sent a voice message';
-            else if (message_type === 'IMAGE' && !textPreview) bodyPreview = '📷 Sent a photo';
-            else bodyPreview = textPreview.length > 50 ? textPreview.substring(0, 47) + '...' : textPreview;
-
+            // PRIVACY: lock-screen previews carry no sender name, patient name or message text.
+            // The actual message is only readable inside the authenticated app.
             // Un-awaited to prevent blocking the HTTP response
             sendMessagePushNotification(recipient.fcm_token, {
-                title: senderName,
-                body: bodyPreview,
+                title: 'Saathi',
+                body: 'You have a new Saathi message.',
                 conversationId: conversation_id,
                 senderId: userId
             }).catch(console.error);

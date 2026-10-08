@@ -1,9 +1,11 @@
-/// Mirrors backend/src/app.js and backend/src/routes/*.
+import 'app_config.dart';
+
+/// Every backend route the app uses. Mirrors backend/src/app.js and routes/*.
+/// The host comes from [AppConfig.baseUrl] (see app_config.dart).
 class ApiEndpoints {
-  /// Override at build time:
-  ///   flutter run --dart-define=API_BASE_URL=http://192.168.1.10:3000
-  /// 10.0.2.2 reaches the host machine from the Android emulator.
-  static const baseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:3000');
+  ApiEndpoints._();
+
+  static String get baseUrl => AppConfig.baseUrl;
 
   static const health = '/api/health';
 
@@ -13,6 +15,8 @@ class ApiEndpoints {
   static const refresh = '/api/auth/refresh';
   static const logout = '/api/auth/logout';
   static const me = '/api/auth/me';
+  static const authProfile = '/api/auth/profile'; // PATCH
+  static const fcmToken = '/api/auth/fcm-token';
 
   // patients
   static const patients = '/api/patients';
@@ -20,31 +24,37 @@ class ApiEndpoints {
 
   // care events
   static const careEvents = '/api/care-events';
+  static const careEventParse = '/api/care-events/parse-command';
   static String careEventsDaily(String patientId) => '/api/care-events/daily/$patientId';
   static String careEventStatus(String id) => '/api/care-events/$id/status';
 
-  // documents
+  // documents / prescriptions
   static const documents = '/api/documents';
+  static const prescriptionScan = '/api/documents/prescriptions/scan';
+  static const medicationsConfirm = '/api/documents/medications/confirm';
   static String patientDocuments(String patientId) => '/api/documents/patient/$patientId';
-  static String verifyDocument(String id) => '/api/documents/$id/verify';
 
   // symptoms / check-in
   static const checkIn = '/api/symptoms/check-in';
   static String todayCheckIn(String patientId) => '/api/symptoms/today/$patientId';
+  static String symptomHistory(String patientId) => '/api/symptoms/history/$patientId';
 
   // dashboard
   static String dashboard(String patientId) => '/api/dashboard/$patientId';
 
   // caregivers
   static const caregiverProfile = '/api/caregivers/profile';
+  static const caregiverAvatar = '/api/caregivers/avatar';
   static const caregiverInvite = '/api/caregivers/invite';
   static const caregiverAcceptInvite = '/api/caregivers/accept-invite';
   static const caregiverPatients = '/api/caregivers/patients';
+  static const caregiverRevoke = '/api/caregivers/revoke';
   static String caregiverAvailability(String patientId) => '/api/caregivers/availability/$patientId';
 
   // chat
   static String chatContacts(String patientId) => '/api/chat/contacts/$patientId';
-  static const chatThread = '/api/chat/thread';
+  static const chatThread = '/api/chat/threads'; // POST: open or create a conversation
+  static const chatConversations = '/api/chat/conversations';
   static const chatSend = '/api/chat/send';
   static const chatUploadAudio = '/api/chat/upload-audio';
   static String chatMessages(String conversationId) => '/api/chat/messages/$conversationId';
@@ -52,8 +62,13 @@ class ApiEndpoints {
   // community
   static const communityFeed = '/api/community/feed';
   static const communityPosts = '/api/community/posts';
+  static String postLike(String id) => '/api/community/posts/$id/like';
+  static String postComment(String id) => '/api/community/posts/$id/comment';
+  static String postComments(String id) => '/api/community/posts/$id/comments';
+  static String pollVote(String optionId) => '/api/community/poll/$optionId/vote';
 
   // calls
   static const callInitiate = '/api/calls/initiate';
+  static const callsIncoming = '/api/calls/incoming';
   static String callStatus(String id) => '/api/calls/$id/status';
 }

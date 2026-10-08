@@ -6,7 +6,7 @@ import '../../../../core/widgets/saathi_card.dart';
 import '../../dashboard/models/care_event.dart';
 import '../../dashboard/widgets/care_event_labels.dart';
 
-/// Today's appointments (events of type APPOINTMENT).
+/// The day's appointments (events of type APPOINTMENT).
 class AppointmentCard extends StatelessWidget {
   final List<CareEvent> events;
   const AppointmentCard({super.key, required this.events});
@@ -27,7 +27,7 @@ class AppointmentCard extends StatelessWidget {
             InfoRow(
               icon: Icons.calendar_today_outlined,
               title: careEventTitle(appts[i]),
-              subtitle: careEventTime(appts[i]),
+              subtitle: appts[i].location == null ? careEventTime(appts[i]) : '${careEventTime(appts[i])} · ${appts[i].location}',
             ),
           ],
         ],

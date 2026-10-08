@@ -12,8 +12,8 @@ router.use(authMiddleware);
 router.post('/parse-command', careEventController.parseCommand);
 
 // Existing CRUD for Care Events
-router.get('/daily/:patient_id', requirePatientAccess(), careEventController.getDailyEvents);
-router.post('/', requirePatientAccess(), careEventController.createEvent);
+router.get('/daily/:patient_id', requirePatientAccess('CARE_EVENT_VIEW'), careEventController.getDailyEvents);
+router.post('/', requirePatientAccess('CARE_EVENT_EDIT'), careEventController.createEvent);
 router.patch('/:id/status', careEventController.updateEventStatus); 
 
 module.exports = router;

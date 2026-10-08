@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import '../../../../core/localization/lang.dart';
 import '../../../../core/localization/strings.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/realtime/socket_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/async_states.dart';
 import '../../../auth/services/auth_state.dart';
@@ -16,8 +18,9 @@ import '../services/chat_service.dart';
 import '../services/media_upload_service.dart';
 import '../widgets/audio_bubble.dart';
 
-/// One conversation. The backend has no push for chat yet, so new messages
-/// are fetched every few seconds while the screen is open.
+/// One conversation. New messages arrive instantly over the socket
+/// (`newMessage`); a slow background refresh is the safety net if the socket
+/// is down. Chat pushes arrive as notifications when the app is closed.
 class ChatScreen extends StatefulWidget {
   final ChatThread thread;
   final CareContact peer;
@@ -38,6 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _failed = false;
   bool _sending = false;
   Timer? _poll;
+  StreamSubscription<ChatMessage>? _live;
 
   bool _recording = false;
   DateTime? _recStart;
@@ -48,17 +52,37 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _load();
-    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _load(silent: true));
+    _live = SocketService.instance.newMessages.listen(_onLive);
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _load(silent: true));
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    _live?.cancel();
     _recTick?.cancel();
-    _recorder.dispose();
+    if (_recording) {
+      // Discard an unfinished recording, then release the recorder.
+      _recorder.stop().then((path) async {
+        if (path != null) {
+          try { await File(path).delete(); } catch (_) {}
+        }
+      }).catchError((_) {}).whenComplete(_recorder.dispose);
+    } else {
+      _recorder.dispose();
+    }
     _controller.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// A message from the other person arrived over the socket.
+  void _onLive(ChatMessage m) {
+    if (m.conversationId != widget.thread.id || !mounted) return;
+    if (_messages.any((x) => x.id == m.id)) return;
+    setState(() => _messages = [..._messages, m]);
+    _scrollToEnd();
+    _load(silent: true); // opening the thread marks their messages as read
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -104,26 +128,41 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ---- voice notes ----
+  // Tap the microphone to start, then tap send (or the bin to discard).
+
+  static const _maxRecordSeconds = 180;
 
   Future<void> _startRecording() async {
-    if (!await _recorder.hasPermission()) {
-      _toast(S.t('micDenied'));
-      return;
+    if (_recording || _sending) return;
+    try {
+      var status = await Permission.microphone.status;
+      if (!status.isGranted) status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        _toast(S.t('micDenied'));
+        if (status.isPermanentlyDenied) await openAppSettings();
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/vn_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 44100), path: path);
+      _recStart = DateTime.now();
+      _recTick?.cancel();
+      _recTick = Timer.periodic(const Duration(seconds: 1), (_) {
+        final s = DateTime.now().difference(_recStart!).inSeconds;
+        if (mounted) setState(() => _recElapsed = '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}');
+        if (s >= _maxRecordSeconds) _sendRecording();
+      });
+      if (mounted) setState(() { _recording = true; _recElapsed = '0:00'; });
+    } catch (e) {
+      _recTick?.cancel();
+      _toast(S.t('recordFailed'));
     }
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/vn_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
-    _recStart = DateTime.now();
-    _recTick = Timer.periodic(const Duration(seconds: 1), (_) {
-      final s = DateTime.now().difference(_recStart!).inSeconds;
-      if (mounted) setState(() => _recElapsed = '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}');
-    });
-    setState(() { _recording = true; _recElapsed = '0:00'; });
   }
 
   Future<void> _cancelRecording() async {
     _recTick?.cancel();
-    final path = await _recorder.stop();
+    String? path;
+    try { path = await _recorder.stop(); } catch (_) {}
     if (path != null) {
       try { await File(path).delete(); } catch (_) {}
     }
@@ -131,15 +170,24 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendRecording() async {
+    if (!_recording || _sending) return;
     _recTick?.cancel();
-    final path = await _recorder.stop();
-    if (mounted) setState(() { _recording = false; _sending = true; });
+    final seconds = _recStart == null ? 0 : DateTime.now().difference(_recStart!).inSeconds;
+    String? path;
+    try { path = await _recorder.stop(); } catch (_) {}
+    if (mounted) setState(() { _recording = false; _sending = path != null && seconds >= 1; });
     if (path == null) {
-      if (mounted) setState(() => _sending = false);
+      _toast(S.t('recordFailed'));
       return;
     }
+    final file = File(path);
     try {
-      final url = await MediaUploadService().uploadVoiceNote(File(path), conversationId: widget.thread.id);
+      if (seconds < 1 || !await file.exists() || await file.length() == 0) {
+        if (mounted) setState(() => _sending = false);
+        _toast(S.t('voiceTooShort'));
+        return;
+      }
+      final url = await MediaUploadService().uploadVoiceNote(file, conversationId: widget.thread.id);
       final m = await _chat.sendAudio(widget.thread.id, url);
       if (!mounted) return;
       setState(() { _messages = [..._messages, m]; _sending = false; });
@@ -148,8 +196,12 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() => _sending = false);
       _toast(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      _toast(S.t('voiceSendFailed'));
     } finally {
-      try { await File(path).delete(); } catch (_) {}
+      try { await file.delete(); } catch (_) {}
     }
   }
 
@@ -171,7 +223,8 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(widget.peer.displayName, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold)),
-                Text(widget.peer.role, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                if (widget.peer.role.isNotEmpty)
+                  Text(widget.peer.role, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
               ],
             ),
             actions: [
@@ -190,6 +243,12 @@ class _ChatScreenState extends State<ChatScreen> {
           body: SafeArea(
             child: Column(
               children: [
+                Container(
+                  width: double.infinity,
+                  color: AppColors.primaryLight,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  child: Text(S.t('chatRetention'), style: const TextStyle(fontSize: 11.5, color: AppColors.primaryDeep)),
+                ),
                 Expanded(child: _list()),
                 _inputBar(),
               ],
@@ -288,16 +347,11 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
-          // We use a GestureDetector here to allow "hold to record" functionality
-          GestureDetector(
-            onLongPress: _sending ? null : _startRecording,
-            onLongPressUp: _sending ? null : _sendRecording,
-            child: IconButton(
-              tooltip: S.t('voiceNote'),
-              icon: const Icon(Icons.mic_none),
-              color: AppColors.primary,
-              onPressed: () {}, // Handled by LongPress
-            ),
+          IconButton(
+            tooltip: S.t('voiceNote'),
+            icon: const Icon(Icons.mic_none),
+            color: AppColors.primary,
+            onPressed: _sending ? null : _startRecording,
           ),
           _sending
               ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.primary)))

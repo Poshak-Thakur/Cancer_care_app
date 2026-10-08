@@ -13,6 +13,10 @@ router.use(requireCentralCounsellor);
 router.get('/patients', adminController.listPatients);
 router.get('/patients/:id', adminController.getPatient);
 
+// Caregiver NGO recognition (central NGO only)
+router.get('/caregivers', adminController.listCaregivers);
+router.patch('/caregivers/:user_id/recognition', adminController.setCaregiverRecognition);
+
 // Alerts
 router.get('/alerts', adminController.listAlerts);
 router.get('/alerts/:id', adminController.getAlert);

@@ -21,6 +21,8 @@ router.post('/invite', requirePatientAccess(), caregiverController.generateInvit
 router.post('/accept-invite', caregiverController.acceptInvite);
 router.get('/patients', caregiverController.getMyLinkedPatients);
 router.patch('/availability/:patient_id', requirePatientAccess(), caregiverController.updateAvailability);
-router.post('/revoke', requirePatientAccess(), caregiverController.revokeCaregiver);
+// No requirePatientAccess() here: revokeCaregiver authorises itself (care-circle manager OR the
+// caregiver removing themselves), so even an unrecognised caregiver can always leave a patient.
+router.post('/revoke', caregiverController.revokeCaregiver);
 
-module.exports = router;
+module.exports = router;

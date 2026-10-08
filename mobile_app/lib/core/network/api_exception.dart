@@ -6,7 +6,10 @@ class ApiException implements Exception {
   /// (e.g. the existing patient in a 409 from POST /api/patients).
   final dynamic data;
 
-  const ApiException(this.message, {this.statusCode, this.data});
+  /// Machine-readable error code some endpoints send (e.g. CAREGIVER_NOT_RECOGNIZED).
+  final String? code;
+
+  const ApiException(this.message, {this.statusCode, this.data, this.code});
 
   bool get isUnauthorized => statusCode == 401;
   bool get isForbidden => statusCode == 403;

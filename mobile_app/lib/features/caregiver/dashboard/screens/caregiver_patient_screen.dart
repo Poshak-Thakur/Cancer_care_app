@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../../core/authorization/access_guard.dart';
+import '../../../../core/authorization/access_scope.dart';
 import '../../../../core/localization/lang.dart';
 import '../../../../core/localization/strings.dart';
 import '../../../../core/network/api_exception.dart';
@@ -10,7 +12,11 @@ import '../../../../core/widgets/info_row.dart';
 import '../../../../core/widgets/saathi_card.dart';
 import '../../../../core/widgets/section_label.dart';
 import '../../../auth/services/auth_state.dart';
+import '../../../patient/check_in/screens/check_in_screen.dart';
+import '../../../patient/check_in/screens/symptom_history_screen.dart';
 import '../../../patient/dashboard/models/dashboard_overview.dart';
+import '../../../patient/dashboard/screens/care_screen.dart';
+import '../../../patient/documents/screens/documents_screen.dart';
 import '../../../patient/dashboard/services/dashboard_service.dart';
 import '../../../patient/dashboard/widgets/today_checklist_card.dart';
 import '../../../patient/messages/screens/care_team_screen.dart';
@@ -37,18 +43,25 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
   @override
   void initState() {
     super.initState();
-    AuthState.setPatient(widget.link.patient); // the patient this caregiver is viewing
+    // The patient this caregiver is viewing, with THIS link's scopes.
+    AuthState.setPatient(widget.link.patient, relationship: 'CAREGIVER', accessScopes: widget.link.accessScopes);
     _load();
   }
 
   Future<void> _load({bool silent = false}) async {
+    if (!AuthState.can(AccessScope.dashboardView)) {
+      setState(() { _loading = false; _failed = false; }); // no DASHBOARD_VIEW: show only what the scopes allow
+      return;
+    }
     if (!silent) setState(() { _loading = true; _failed = false; });
     try {
       final d = await DashboardService().overview(widget.link.patient.id);
+      AuthState.refreshScopes(d.accessScopes); // the backend's current scopes for this link
       if (!mounted) return;
       setState(() { _data = d; _loading = false; _failed = false; });
-    } on ApiException {
+    } on ApiException catch (e) {
       if (!mounted) return;
+      if (AccessGuard.handle(context, e)) return;
       setState(() { _loading = false; _failed = _data == null; });
     }
   }
@@ -58,12 +71,40 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
     setState(() => _availability = value);
     try {
       await CaregiverService().updateAvailability(widget.link.patient.id, value);
-    } on ApiException {
+    } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _availability = before);
+      if (AccessGuard.handle(context, e)) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.t('couldNotUpdate'))));
     }
   }
+
+  Future<void> _leave() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.t('leavePatient')),
+        content: Text(S.t('leavePatientBody')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(S.t('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.warning))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      // A caregiver may remove their own link (POST /api/caregivers/revoke).
+      await CaregiverService().revoke(patientId: widget.link.patient.id, caregiverUserId: AuthState.userId);
+      if (mounted) Navigator.of(context).pop();
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Widget _link(IconData icon, String title, String sub, VoidCallback onTap) => SaathiCard(
+        onTap: onTap,
+        child: InfoRow(icon: icon, title: title, subtitle: sub, trailing: const Icon(Icons.chevron_right, color: AppColors.primary)),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -97,21 +138,36 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(S.t('availabilityNote'), style: const TextStyle(fontSize: 12.5, color: AppColors.textFaint, height: 1.4)),
-                  if (_loading && data == null)
+                  if (!AuthState.can(AccessScope.dashboardView))
+                    SaathiCard(child: InfoRow(icon: Icons.lock_outline, title: S.t('limitedAccess'), subtitle: S.t('limitedAccessSub')))
+                  else if (_loading && data == null)
                     const LoadingView()
                   else if (_failed || data == null)
                     ErrorView(message: S.t('loadFailed'), onRetry: _load)
                   else ...[
-                    SectionLabel(S.t('todaysCheckin')),
-                    SaathiCard(
-                      child: InfoRow(
-                        icon: data.checkInCompleted ? Icons.check_circle_outline : Icons.pending_outlined,
-                        title: data.checkInCompleted ? S.t('checkinDoneToday') : S.t('checkinNotDone'),
+                    for (final a in data.alerts.take(2))
+                      SaathiCard(
+                        rose: true,
+                        child: InfoRow(icon: Icons.notification_important_outlined, rose: true, title: S.t('alertTitle'), subtitle: S.t('alertSub')),
                       ),
-                    ),
-                    SectionLabel(S.t('today')),
-                    TodayChecklistCard(events: data.events),
-                    if (data.documents.isNotEmpty) ...[
+                    if (AuthState.can(AccessScope.symptomView)) ...[
+                      SectionLabel(S.t('todaysCheckin')),
+                      SaathiCard(
+                        child: InfoRow(
+                          icon: data.checkInCompleted ? Icons.check_circle_outline : Icons.pending_outlined,
+                          title: data.checkInCompleted ? S.t('checkinDoneToday') : S.t('checkinNotDone'),
+                        ),
+                      ),
+                    ],
+                    if (AuthState.can(AccessScope.careEventView)) ...[
+                      SectionLabel(S.t('today')),
+                      TodayChecklistCard(
+                        events: data.events,
+                        readOnly: !AuthState.can(AccessScope.careEventEdit),
+                        onChanged: () => _load(silent: true),
+                      ),
+                    ],
+                    if (AuthState.can(AccessScope.documentView) && data.documents.isNotEmpty) ...[
                       SectionLabel(S.t('recentDocuments')),
                       SaathiCard(
                         child: Column(
@@ -125,11 +181,24 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
                       ),
                     ],
                   ],
-                  const SizedBox(height: 18),
+                  SectionLabel(S.t('records')),
+                  if (AuthState.can(AccessScope.careEventView))
+                  _link(Icons.event_note_outlined, S.t('carePlan'), S.t('carePlanSub'), () => AppRoutes.push(context, _CarePage(patientId: widget.link.patient.id))),
+                  if (AuthState.can(AccessScope.symptomWrite))
+                  _link(Icons.sentiment_satisfied_alt, S.t('checkInForPatient'), S.t('checkInForPatientSub'), () async {
+                    await AppRoutes.push(context, CheckInScreen(patientId: widget.link.patient.id));
+                    if (mounted) _load(silent: true);
+                  }),
+                  if (AuthState.can(AccessScope.symptomView))
+                  _link(Icons.monitor_heart_outlined, S.t('checkinHistory'), S.t('checkinHistorySub'), () => AppRoutes.push(context, SymptomHistoryScreen(patientId: widget.link.patient.id))),
+                  if (AuthState.can(AccessScope.documentView))
+                  _link(Icons.description_outlined, S.t('documents'), S.t('documentsSub'), () => AppRoutes.push(context, DocumentsScreen(patientId: widget.link.patient.id))),
+                  const SizedBox(height: 10),
                   PrimaryButton(
                     label: S.t('careTeam'),
                     onPressed: () => AppRoutes.push(context, CareTeamScreen(patientId: widget.link.patient.id, embedded: false)),
                   ),
+                  Center(child: TextButton(onPressed: _leave, child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.warning)))),
                 ],
               ),
             ),
@@ -138,4 +207,16 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
       },
     );
   }
+}
+
+/// The care plan of one patient, opened from a caregiver's patient screen.
+class _CarePage extends StatelessWidget {
+  final String patientId;
+  const _CarePage({required this.patientId});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(S.t('carePlan'))),
+        body: SafeArea(child: CareScreen(patientId: patientId)),
+      );
 }

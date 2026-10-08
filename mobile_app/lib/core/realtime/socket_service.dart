@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as io;
-import '../constants/api_endpoints.dart';
+import '../constants/app_config.dart';
 import '../network/api_client.dart';
 import '../storage/token_storage.dart';
+import '../../features/patient/messages/models/chat_message.dart';
 import '../../features/shared/calls/models/call_models.dart';
 
-/// Socket.io connection used for instant call ringing.
+/// Socket.io connection used for instant call ringing and live chat.
 ///
 /// The backend authenticates the handshake with the access token
 /// (`auth: { token }`) and puts the user in their private room itself, so the
-/// app no longer emits `join`. Events used: `incomingCall`, `callStatusUpdated`.
+/// app no longer emits `join`. Events used: `incomingCall`, `callStatusUpdated`, `newMessage`.
 ///
 /// Access tokens last 1 hour. When the server rejects the handshake (expired
 /// token), the app refreshes the token and reconnects.
@@ -25,7 +26,14 @@ class SocketService {
   final _incoming = StreamController<IncomingCall>.broadcast();
   final _status = StreamController<CallStatusUpdate>.broadcast();
 
+  final _messages = StreamController<ChatMessage>.broadcast();
+
   Stream<IncomingCall> get incomingCalls => _incoming.stream;
+
+  /// Live chat: every message another user sends to this user (`newMessage`).
+  Stream<ChatMessage> get newMessages => _messages.stream;
+
+  bool get connected => _socket?.connected ?? false;
   Stream<CallStatusUpdate> get statusUpdates => _status.stream;
 
   Future<void> start(String userId) async {
@@ -38,7 +46,7 @@ class SocketService {
     if (_userId != userId) return; // stopped or switched user while waiting
 
     final s = io.io(
-      ApiEndpoints.baseUrl,
+      AppConfig.socketUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
           .setAuth({'token': TokenStorage.accessToken ?? ''})
@@ -54,6 +62,11 @@ class SocketService {
     s.on('incomingCall', (data) {
       try {
         _incoming.add(IncomingCall.fromJson(Map<String, dynamic>.from(data as Map)));
+      } catch (_) {}
+    });
+    s.on('newMessage', (data) {
+      try {
+        _messages.add(ChatMessage.fromJson(Map<String, dynamic>.from(data as Map)));
       } catch (_) {}
     });
     s.on('callStatusUpdated', (data) {
@@ -80,6 +93,19 @@ class SocketService {
       s.auth = {'token': TokenStorage.accessToken ?? ''};
       s.connect();
     });
+  }
+
+  /// Called when the app returns to the foreground: a phone may have dropped
+  /// the connection while the app was in the background.
+  Future<void> reconnectIfNeeded() async {
+    final s = _socket;
+    if (s == null || _userId == null || s.connected) return;
+    _retry?.cancel();
+    _retry = null;
+    await ApiClient.instance.ensureFreshToken();
+    if (_socket != s || s.connected) return;
+    s.auth = {'token': TokenStorage.accessToken ?? ''};
+    s.connect();
   }
 
   void stop() {

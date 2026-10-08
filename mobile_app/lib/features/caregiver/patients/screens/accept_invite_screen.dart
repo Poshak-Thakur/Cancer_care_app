@@ -1,22 +1,20 @@
 import 'package:flutter/material.dart';
+import '../../../../core/authorization/access_guard.dart';
+import '../../../auth/services/auth_api_service.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/localization/lang.dart';
 import '../../../../core/localization/strings.dart';
 import '../../../../core/network/api_exception.dart';
-import '../../../../core/realtime/socket_service.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/buttons.dart';
 import '../../../auth/services/auth_state.dart';
-import '../../caregiver_shell.dart';
 import '../services/caregiver_service.dart';
 import 'qr_scan_screen.dart';
 
 /// Caregiver links to a patient by pasting or scanning the invite code.
-/// [onboarding] is true when this is the last step of first-time sign-up.
 class AcceptInviteScreen extends StatefulWidget {
-  final bool onboarding;
-  const AcceptInviteScreen({super.key, this.onboarding = false});
+  const AcceptInviteScreen({super.key});
 
   @override
   State<AcceptInviteScreen> createState() => _AcceptInviteScreenState();
@@ -46,7 +44,7 @@ class _AcceptInviteScreenState extends State<AcceptInviteScreen> {
   }
 
   Future<void> _link() async {
-    final code = _code.text.trim();
+    final code = _code.text.replaceAll(RegExp(r'\s+'), '').toUpperCase();
     if (code.isEmpty || _saving) return;
     FocusScope.of(context).unfocus();
     setState(() {
@@ -59,21 +57,23 @@ class _AcceptInviteScreenState extends State<AcceptInviteScreen> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = e.message;
+        // 403 CAREGIVER_NOT_RECOGNIZED: say it in plain words, never "403 Forbidden".
+        _error = AccessGuard.isNotRecognized(e) ? S.t('notRecognized') : e.message;
       });
       return;
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.t('linkedOk'))));
-    if (widget.onboarding) {
-      // First link: the account is now a caregiver. Open the caregiver home.
-      AuthState.role = 'caregiver';
-      if (!AuthState.roles.contains('CAREGIVER')) AuthState.roles = [...AuthState.roles, 'CAREGIVER'];
-      SocketService.instance.start(AuthState.userId);
-      AppRoutes.pushAndClear(context, const CaregiverShell());
-    } else {
-      Navigator.of(context).pop(true); // tells the patient list to reload
+    // Refresh the account (roles, caregiver profile) from the backend, then
+    // tell the caller to reload its patient list.
+    try {
+      final me = await AuthApiService().me();
+      AuthState.applyAccount(me);
+      AuthState.roles = me.roles;
+    } on ApiException {
+      // not critical: the patient list is reloaded from its own endpoint
     }
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   @override
@@ -91,12 +91,12 @@ class _AcceptInviteScreenState extends State<AcceptInviteScreen> {
                 const SizedBox(height: 18),
                 TextField(
                   controller: _code,
-                  minLines: 3,
-                  maxLines: 5,
+                  maxLines: 1,
+                  textCapitalization: TextCapitalization.characters,
                   autocorrect: false,
                   enableSuggestions: false,
                   onChanged: (_) => setState(() => _error = null),
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: 4),
                   decoration: InputDecoration(
                     hintText: S.t('inviteCodeHint'),
                     filled: true,

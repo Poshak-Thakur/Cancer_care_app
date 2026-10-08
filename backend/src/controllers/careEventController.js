@@ -1,5 +1,5 @@
 const prisma = require('../config/db');
-const { verifyPatientDataEventAccess } = require('../services/authorizationService');
+const { verifyPatientDataEventAccess, requirePatientScope } = require('../services/authorizationService');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getISTDayBoundaries } = require('../utils/timezoneHelper');
 const { isUuid } = require('../utils/validators');
@@ -215,8 +215,10 @@ exports.updateEventStatus = async (req, res, next) => {
         const event = await prisma.careevent.findUnique({ where: { id } });
         if (!event) return res.status(404).json({ status: 'error', message: 'Care event not found.' });
 
-        const hasAccess = await verifyPatientDataEventAccess(userId, event.patient_id);
-        if (!hasAccess) return res.status(403).json({ status: 'error', message: 'Unauthorized access to modify this event.' });
+        // Needs the CARE_EVENT_EDIT scope on the event's patient (this route has no patient_id param,
+        // so the scope is checked here against the stored event).
+        const ctx = await requirePatientScope(userId, event.patient_id, 'CARE_EVENT_EDIT');
+        if (!ctx) return res.status(403).json({ status: 'error', message: 'Unauthorized access to modify this event.' });
 
         const updatedEvent = await prisma.careevent.update({
             where: { id },

@@ -7,8 +7,8 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-router.post('/check-in', requirePatientAccess(), symptomController.submitCheckIn);
-router.get('/today/:patient_id', requirePatientAccess(), symptomController.getTodayCheckInStatus);
-router.get('/history/:patient_id', requirePatientAccess(), symptomController.getSymptomHistory);
+router.post('/check-in', requirePatientAccess('SYMPTOM_WRITE'), symptomController.submitCheckIn);
+router.get('/today/:patient_id', requirePatientAccess('SYMPTOM_VIEW'), symptomController.getTodayCheckInStatus);
+router.get('/history/:patient_id', requirePatientAccess('SYMPTOM_VIEW'), symptomController.getSymptomHistory);
 
 module.exports = router;

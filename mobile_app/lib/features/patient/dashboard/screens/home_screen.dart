@@ -11,8 +11,13 @@ import '../../../../core/widgets/lang_toggle.dart';
 import '../../../../core/widgets/saathi_card.dart';
 import '../../../../core/widgets/saathi_logo.dart';
 import '../../../../core/widgets/section_label.dart';
+import '../../../../core/authorization/access_guard.dart';
+import '../../../../core/authorization/access_scope.dart';
+import '../../../auth/screens/patient_picker_screen.dart';
 import '../../../auth/services/auth_state.dart';
 import '../../check_in/screens/check_in_screen.dart';
+import '../../messages/services/chat_service.dart';
+import '../../../../core/utils/ist.dart';
 import '../models/dashboard_overview.dart';
 import '../services/dashboard_service.dart';
 import '../widgets/care_event_labels.dart';
@@ -30,6 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
   DashboardOverview? _data;
   bool _loading = true;
   bool _failed = false;
+  int _unread = 0;
+  bool _noAccess = false; // this relationship has no DASHBOARD_VIEW
 
   @override
   void initState() {
@@ -46,6 +53,15 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       return;
     }
+    if (!AuthState.can(AccessScope.dashboardView)) {
+      setState(() {
+        _noAccess = true;
+        _loading = false;
+        _failed = false;
+      });
+      _loadUnread();
+      return;
+    }
     if (!silent) {
       setState(() {
         _loading = true;
@@ -54,19 +70,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final data = await DashboardService().overview(pid);
+      AuthState.refreshScopes(data.accessScopes); // picks up scope changes made by the NGO/patient
+      _loadUnread();
       if (!mounted) return;
       setState(() {
+        _noAccess = false;
         _data = data;
         _loading = false;
         _failed = false;
       });
-    } on ApiException {
+    } on ApiException catch (e) {
       if (!mounted) return;
+      if (AccessGuard.handle(context, e)) return;
       setState(() {
         _loading = false;
         _failed = _data == null; // keep showing old data on a failed refresh
       });
     }
+  }
+
+  /// Conversations whose newest message is from someone else and unread.
+  Future<void> _loadUnread() async {
+    try {
+      final list = await ChatService().conversations();
+      final n = list.where((c) => c.unreadFor(AuthState.userId)).length;
+      if (mounted) setState(() => _unread = n);
+    } catch (_) {}
   }
 
   Future<void> _openCheckIn() async {
@@ -107,7 +136,9 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 2),
               Text(S.t('howFeeling'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
               const SizedBox(height: 18),
-              if (_loading && data == null)
+              if (_noAccess)
+                ..._limitedAccess()
+              else if (_loading && data == null)
                 const LoadingView()
               else if (_failed || data == null)
                 ErrorView(message: S.t('loadFailed'), onRetry: _load)
@@ -120,11 +151,46 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Shown when the current relationship has no DASHBOARD_VIEW (e.g. a
+  /// delegate that only holds ACCOUNT_OPERATE): chat and community still work.
+  List<Widget> _limitedAccess() => [
+        if (AuthState.isManagingOther || AuthState.patientLinks.length > 1)
+          SaathiCard(child: InfoRow(icon: Icons.supervisor_account_outlined, title: '${S.t('actingAs')} ${AuthState.patient?.fullName ?? ''}')),
+        SaathiCard(
+          child: InfoRow(icon: Icons.lock_outline, title: S.t('limitedAccess'), subtitle: S.t('limitedAccessSub')),
+        ),
+      ];
+
   List<Widget> _content(DashboardOverview data) {
     final medCount = data.events.where((e) => e.isMedication).length;
     final appts = data.events.where((e) => e.isAppointment).toList();
 
     return [
+      if (AuthState.isManagingOther || AuthState.patientLinks.length > 1)
+        SaathiCard(
+          child: InfoRow(
+            icon: Icons.supervisor_account_outlined,
+            title: '${S.t('actingAs')} ${AuthState.patient?.fullName ?? ''}',
+            subtitle: AuthState.patientLinks.length > 1 ? S.t('choosePatientSub') : null,
+            trailing: AuthState.patientLinks.length > 1
+                ? TextButton(
+                    onPressed: () => AppRoutes.push(context, PatientPickerScreen(links: AuthState.patientLinks)),
+                    child: Text(S.t('switchPatient'), style: const TextStyle(fontSize: 13)),
+                  )
+                : null,
+          ),
+        ),
+      for (final a in data.alerts.take(2))
+        SaathiCard(
+          rose: true,
+          child: InfoRow(
+            icon: Icons.notification_important_outlined,
+            rose: true,
+            title: S.t('alertTitle'),
+            subtitle: '${S.t('alertSub')} · ${Ist.clock(a.createdAt)}',
+          ),
+        ),
+      if (AuthState.can(AccessScope.symptomWrite))
       SaathiCard(
         onTap: _openCheckIn,
         child: InfoRow(
@@ -139,6 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       const SizedBox(height: 14),
 
+      if (AuthState.can(AccessScope.careEventView))
       Row(
         children: [
           Expanded(
@@ -176,7 +243,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       const SizedBox(height: 14),
 
-      // Chat and community are still demo content (no backend yet).
       SaathiCard(
         rose: true,
         onTap: () => widget.onNavigate(3),
@@ -184,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icons.chat_bubble_outline,
           rose: true,
           title: S.t('yourCounsellor'),
-          subtitle: S.t('oneNewMessage'),
+          subtitle: _unread == 0 ? S.t('noNewMessages') : S.unreadMessages(_unread),
           trailing: Text(S.t('view'), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.roseText)),
         ),
       ),
@@ -197,13 +263,19 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icons.groups_outlined,
           rose: true,
           title: S.t('yourCommunity'),
-          subtitle: S.t('threeNewStories'),
+          subtitle: S.t('communityCardSub'),
           trailing: Text(S.t('view'), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.roseText)),
         ),
       ),
 
-      SectionLabel(S.t('today')),
-      TodayChecklistCard(events: data.events),
+      if (AuthState.can(AccessScope.careEventView)) ...[
+        SectionLabel(S.t('today')),
+        TodayChecklistCard(
+          events: data.events,
+          readOnly: !AuthState.can(AccessScope.careEventEdit),
+          onChanged: () => _load(silent: true),
+        ),
+      ],
     ];
   }
 }

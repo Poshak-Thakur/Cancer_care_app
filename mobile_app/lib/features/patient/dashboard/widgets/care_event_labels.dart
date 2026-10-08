@@ -1,13 +1,9 @@
 import '../../../../core/localization/strings.dart';
+import '../../../../core/utils/ist.dart';
 import '../models/care_event.dart';
 
-String careEventTitle(CareEvent e) {
-  final m = e.medication;
-  if (e.isMedication && m != null) {
-    final strength = m.strength;
-    return (strength != null && strength.isNotEmpty) ? '${m.name} — $strength' : m.name;
-  }
-  switch (e.type) {
+String careEventTypeLabel(String type) {
+  switch (type) {
     case 'MEDICATION_DOSE':
       return S.t('medication');
     case 'APPOINTMENT':
@@ -23,10 +19,16 @@ String careEventTitle(CareEvent e) {
   }
 }
 
-/// 12-hour clock, e.g. "9:05 AM".
-String careEventTime(CareEvent e) {
-  final t = e.scheduleTime;
-  final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
-  final m = t.minute.toString().padLeft(2, '0');
-  return '$h:$m ${t.hour < 12 ? 'AM' : 'PM'}';
+String careEventTitle(CareEvent e) {
+  final custom = e.title;
+  if (custom != null && custom.isNotEmpty) return custom;
+  final m = e.medication;
+  if (e.isMedication && m != null) {
+    final strength = m.strength;
+    return (strength != null && strength.isNotEmpty) ? '${m.name} — $strength' : m.name;
+  }
+  return careEventTypeLabel(e.type);
 }
+
+/// 12-hour clock in India Standard Time, e.g. "9:05 AM".
+String careEventTime(CareEvent e) => Ist.clock(e.scheduleTime);

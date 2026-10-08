@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../../../core/authorization/access_guard.dart';
+import '../../../auth/services/auth_api_service.dart';
+import '../../../auth/services/auth_state.dart';
 import '../../../../core/localization/lang.dart';
 import '../../../../core/localization/strings.dart';
 import '../../../../core/network/api_exception.dart';
@@ -29,18 +32,41 @@ class _CaregiverPatientsScreenState extends State<CaregiverPatientsScreen> {
   @override
   void initState() {
     super.initState();
+    AccessGuard.revision.addListener(_onRevoked);
     _load();
+  }
+
+  @override
+  void dispose() {
+    AccessGuard.revision.removeListener(_onRevoked);
+    super.dispose();
+  }
+
+  void _onRevoked() {
+    if (mounted) _load(silent: true);
   }
 
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() { _loading = true; _failed = false; });
     try {
       final list = await CaregiverService().myPatients();
+      if (list.isEmpty) await _refreshRecognition(); // explains an empty list
       if (!mounted) return;
       setState(() { _patients = list; _loading = false; _failed = false; });
     } on ApiException {
       if (!mounted) return;
       setState(() { _loading = false; _failed = _patients == null; });
+    }
+  }
+
+  /// An unrecognised caregiver sees no patients (backend rule). Read the
+  /// current recognition status so the empty state can say why.
+  Future<void> _refreshRecognition() async {
+    try {
+      final me = await AuthApiService().me();
+      AuthState.applyAccount(me);
+    } on ApiException {
+      // keep the last known value
     }
   }
 
@@ -79,7 +105,7 @@ class _CaregiverPatientsScreenState extends State<CaregiverPatientsScreen> {
                 if (list.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
-                    child: Text(S.t('noPatientsYet'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, color: AppColors.textSecondary, height: 1.4)),
+                    child: Text(AuthState.ngoRecognized ? S.t('noPatientsYet') : S.t('notRecognizedWaiting'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, color: AppColors.textSecondary, height: 1.4)),
                   ),
                 for (final p in list)
                   SaathiCard(

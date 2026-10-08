@@ -10,4 +10,19 @@ router.use(authMiddleware);
 router.post('/', patientController.createPatientProfile);
 router.get('/me', patientController.getMyPatients);
 
+router.post(
+    '/:patient_id/delegates',
+    patientController.addPatientDelegate
+);
+
+router.patch(
+    '/:patient_id/delegates/:user_id',
+    patientController.updatePatientDelegate
+);
+
+router.delete(
+    '/:patient_id/delegates/:user_id',
+    patientController.revokePatientDelegate
+);
+
 module.exports = router;

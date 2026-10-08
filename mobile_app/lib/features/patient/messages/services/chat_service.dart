@@ -14,10 +14,18 @@ class ChatService {
     return list;
   }
 
+  /// GET /api/chat/conversations: every thread the user is in, newest first.
+  Future<List<ConversationSummary>> conversations() async {
+    final res = await _api.get(ApiEndpoints.chatConversations);
+    final list = (res['data'] as List).map((e) => ConversationSummary.fromJson(Map<String, dynamic>.from(e as Map))).toList()
+      ..sort((a, b) => b.sortTime.compareTo(a.sortTime));
+    return list;
+  }
+
   /// Opens (or creates) the thread with [participantId].
-  Future<ChatThread> openThread({required String patientId, required String participantId}) async {
+  Future<ChatThread> openThread({String? patientId, required String participantId}) async {
     final res = await _api.post(ApiEndpoints.chatThread, body: {
-      'patient_id': patientId,
+      if (patientId != null) 'patient_id': patientId,
       'participant_id': participantId,
     });
     return ChatThread.fromJson(res['data'] as Map<String, dynamic>);

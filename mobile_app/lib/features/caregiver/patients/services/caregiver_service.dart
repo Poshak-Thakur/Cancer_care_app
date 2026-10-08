@@ -6,18 +6,6 @@ import '../models/linked_patient.dart';
 class CaregiverService {
   final ApiClient _api = ApiClient.instance;
 
-  /// POST /api/caregivers/profile. [type]: FAMILY | VOLUNTEER (volunteers are
-  /// PENDING until the NGO approves them). A 409 means the profile already
-  /// exists, which is fine here.
-  Future<void> createProfile(String type) async {
-    try {
-      await _api.post(ApiEndpoints.caregiverProfile, body: {'caregiver_type': type});
-    } on ApiException catch (e) {
-      if (e.statusCode == 409) return;
-      rethrow;
-    }
-  }
-
   /// Patient side: POST /api/caregivers/invite. Returns the signed invite
   /// code (valid for 7 days). The backend answers
   /// { status, data: { invite_code, code, expires_at, patient_id } }.
@@ -37,6 +25,11 @@ class CaregiverService {
       'invite_code': inviteToken, // backend reads invite_code (or code)
       if (relationshipLabel != null && relationshipLabel.isNotEmpty) 'relationship_label': relationshipLabel,
     });
+  }
+
+  /// POST /api/caregivers/revoke: the patient withdraws a caregiver's access.
+  Future<void> revoke({required String patientId, required String caregiverUserId}) async {
+    await _api.post(ApiEndpoints.caregiverRevoke, body: {'patient_id': patientId, 'caregiver_user_id': caregiverUserId});
   }
 
   Future<List<LinkedPatient>> myPatients() async {

@@ -4,34 +4,27 @@ import '../../../../core/network/api_exception.dart';
 import '../../check_in/services/check_in_service.dart';
 import '../../documents/models/medical_document.dart';
 import '../../documents/services/document_service.dart';
-import '../models/care_event.dart';
 import '../models/dashboard_overview.dart';
 import 'care_event_service.dart';
 
 class DashboardService {
   final ApiClient _api = ApiClient.instance;
 
-  /// GET /api/dashboard/:patientId, with two adjustments:
+  /// GET /api/dashboard/:patientId: today's care tasks, alerts, check-in state
+  /// and recent documents, all cut at midnight IST by the server.
   ///
-  /// 1. Care tasks are replaced by the local-day list from the care-events API
-  ///    (the dashboard cuts "today" by server time, not the user's time zone).
-  /// 2. If the dashboard endpoint itself fails with a server error (5xx), the
-  ///    same screen data is assembled from the smaller endpoints, so Home
-  ///    still works.
+  /// If the endpoint itself fails with a server error (5xx), the same screen
+  /// data is assembled from the smaller endpoints so Home still works.
   Future<DashboardOverview> overview(String patientId) async {
-    DashboardOverview? dash;
     try {
       final res = await _api.get(ApiEndpoints.dashboard(patientId));
-      dash = DashboardOverview.fromJson(res['data'] as Map<String, dynamic>);
+      return DashboardOverview.fromJson(Map<String, dynamic>.from(res['data'] as Map));
     } on ApiException catch (e) {
       final serverError = e.statusCode != null && e.statusCode! >= 500;
       if (!serverError) rethrow;
     }
 
-    final events = await _localDayEvents(patientId, fallback: dash?.events);
-    if (dash != null) return dash.withEvents(events);
-
-    // Fallback path: build the overview from separate calls.
+    final events = await CareEventService().today(patientId);
     bool checkIn = false;
     try {
       checkIn = await CheckInService().completedToday(patientId);
@@ -53,14 +46,5 @@ class DashboardService {
       checkInCompleted: checkIn,
       documents: docs,
     );
-  }
-
-  Future<List<CareEvent>> _localDayEvents(String patientId, {List<CareEvent>? fallback}) async {
-    try {
-      return await CareEventService().today(patientId);
-    } on ApiException {
-      if (fallback != null) return fallback;
-      rethrow;
-    }
   }
 }

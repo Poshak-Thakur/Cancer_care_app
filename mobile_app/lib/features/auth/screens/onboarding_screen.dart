@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/push/push_service.dart';
 import '../../../core/realtime/socket_service.dart';
+import '../../patient/profile/models/patient.dart';
+import '../services/auth_api_service.dart';
 import '../../patient/profile/services/patient_service.dart';
 import '../services/auth_state.dart';
 import '../../../core/routing/app_routes.dart';
@@ -59,16 +62,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _saving = true;
       _error = null;
     });
+    final lang = Lang.isHindi.value ? 'hi' : 'en';
     try {
-      final patient = await PatientService().createProfile(
-        fullName: _name.text.trim(),
-        dateOfBirth: _dob!,
-        preferredLanguage: Lang.isHindi.value ? 'hi' : 'en',
-      );
+      Patient patient;
+      try {
+        patient = await PatientService().createProfile(
+          fullName: _name.text.trim(),
+          dateOfBirth: _dob!,
+          preferredLanguage: lang,
+        );
+      } on ApiException catch (e) {
+        // 409: this account already has its own patient profile. Use it.
+        final existing = e.statusCode == 409 && e.data is Map ? (e.data as Map)['patient'] : null;
+        if (existing is! Map) rethrow;
+        patient = Patient.fromJson(Map<String, dynamic>.from(existing));
+      }
       if (!mounted) return;
       AuthState.setPatient(patient);
       AuthState.roles = const ['PATIENT'];
+      AuthState.role = 'patient';
+
+      // Also store the name on the account so the backend reports
+      // is_profile_completed = true on the next sign-in.
+      try {
+        final account = await AuthApiService().updateProfile(
+          fullName: _name.text.trim(),
+          dateOfBirth: _dob!,
+          preferredLanguage: lang,
+        );
+        AuthState.applyAccount(account);
+      } on ApiException {
+        // The patient exists; the router completes the account at next sign-in.
+      }
+      if (!mounted) return;
       SocketService.instance.start(AuthState.userId);
+      PushService.registerForUser();
       AppRoutes.pushAndClear(context, const PatientShell());
     } on ApiException catch (e) {
       if (!mounted) return;

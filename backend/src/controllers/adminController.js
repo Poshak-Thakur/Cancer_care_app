@@ -1,5 +1,7 @@
 const prisma = require('../config/db');
 const { isUuid } = require('../utils/validators');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
+const HttpError = require('../utils/httpError');
 
 /**
  * NGO WEB ADMIN API
@@ -38,6 +40,123 @@ const writeAudit = (client, req, { targetId, action, payload }) =>
     });
 
 // ------------------------------------------------------------------
+// CAREGIVER NGO RECOGNITION
+// Only the central NGO reaches these handlers (adminRoutes). Recognition is an NGO-side
+// decision, never a patient or caregiver action. There is no approval/training workflow:
+//   NOT_RECOGNIZED <-> RECOGNIZED
+// ------------------------------------------------------------------
+
+const RECOGNITION_STATUSES = ['NOT_RECOGNIZED', 'RECOGNIZED'];
+const CAREGIVER_TYPE_VALUES = ['FAMILY', 'VOLUNTEER'];
+const CAREGIVER_USER_SELECT = { id: true, email: true, full_name: true, phone_number: true, avatar_url: true };
+
+// GET /api/admin/caregivers?recognition_status=&caregiver_type=&search=&page=&limit=
+exports.listCaregivers = async (req, res, next) => {
+    try {
+        const { page, limit, skip } = parsePagination(req.query);
+        const { recognition_status, caregiver_type } = req.query;
+        const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+        if (recognition_status !== undefined && !RECOGNITION_STATUSES.includes(recognition_status)) {
+            return res.status(400).json({ status: 'error', message: 'recognition_status must be NOT_RECOGNIZED or RECOGNIZED.' });
+        }
+        if (caregiver_type !== undefined && !CAREGIVER_TYPE_VALUES.includes(caregiver_type)) {
+            return res.status(400).json({ status: 'error', message: 'caregiver_type must be FAMILY or VOLUNTEER.' });
+        }
+
+        const where = {
+            ...(recognition_status ? { ngo_recognition_status: recognition_status } : {}),
+            ...(caregiver_type ? { caregiver_type } : {}),
+            ...(search ? {
+                useraccount: {
+                    OR: [
+                        { full_name: { contains: search, mode: 'insensitive' } },
+                        { email: { contains: search, mode: 'insensitive' } }
+                    ]
+                }
+            } : {})
+        };
+
+        const [total, profiles] = await Promise.all([
+            prisma.caregiverprofile.count({ where }),
+            prisma.caregiverprofile.findMany({
+                where,
+                orderBy: { created_at: 'desc' },
+                skip,
+                take: limit,
+                include: { useraccount: { select: CAREGIVER_USER_SELECT } }
+            })
+        ]);
+
+        const data = profiles.map(({ useraccount, ...profile }) => ({ ...profile, user: useraccount }));
+        return res.status(200).json({
+            status: 'success',
+            data,
+            pagination: { page, limit, total, total_pages: Math.ceil(total / limit) }
+        });
+    } catch (error) { next(error); }
+};
+
+// FROZEN BEHAVIOUR: recognition is an ELIGIBILITY switch, not a relationship change.
+//   recognition removed  -> patient access is blocked centrally (authorizationService); no
+//                           patientcaregiverlink is revoked or deleted.
+//   recognised again     -> existing GRANTED + non-revoked links become usable again.
+// Patient-specific consent lives on patientcaregiverlink; only revocation ends it.
+// PATCH /api/admin/caregivers/:user_id/recognition   Body: { "recognized": true | false }
+exports.setCaregiverRecognition = async (req, res, next) => {
+    try {
+        const targetUserId = req.params.user_id;
+        const actorId = req.user.userId;
+        const { recognized } = req.body || {};
+
+        if (!isUuid(targetUserId)) {
+            return res.status(400).json({ status: 'error', message: 'user_id must be a valid UUID.' });
+        }
+        if (typeof recognized !== 'boolean') {
+            return res.status(400).json({ status: 'error', message: 'recognized must be true or false.' });
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+            const profile = await tx.caregiverprofile.findUnique({ where: { user_id: targetUserId } });
+            if (!profile) throw new HttpError(404, 'Caregiver profile not found.');
+
+            const alreadyThere = (profile.ngo_recognition_status === 'RECOGNIZED') === recognized;
+            if (alreadyThere) return { profile, changed: false };
+
+            const updated = await tx.caregiverprofile.update({
+                where: { user_id: targetUserId },
+                data: recognized
+                    ? { ngo_recognition_status: 'RECOGNIZED', recognized_by: actorId, recognized_at: new Date() }
+                    : { ngo_recognition_status: 'NOT_RECOGNIZED', recognized_by: null, recognized_at: null }
+            });
+
+            await recordAudit(tx, {
+                actorId,
+                action: recognized ? AUDIT_ACTIONS.CAREGIVER_RECOGNIZED : AUDIT_ACTIONS.CAREGIVER_RECOGNITION_REVOKED,
+                targetResource: RESOURCES.CAREGIVER_PROFILE,
+                targetId: profile.id,
+                targetUserId,
+                extra: {
+                    caregiver_type: profile.caregiver_type,
+                    previous_status: profile.ngo_recognition_status,
+                    new_status: updated.ngo_recognition_status
+                },
+                req
+            });
+            return { profile: updated, changed: true };
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            message: result.changed
+                ? (recognized ? 'Caregiver recognised.' : 'Caregiver recognition removed.')
+                : 'No change: caregiver was already in that state.',
+            data: result.profile
+        });
+    } catch (error) { next(error); }
+};
+
+// ------------------------------------------------------------------
 // PATIENTS
 // ------------------------------------------------------------------
 
@@ -67,11 +186,11 @@ exports.listPatients = async (req, res, next) => {
                     _count: {
                         select: {
                             alert: { where: { status: { in: ACTIVE_ALERT_STATUSES } } },
-                            patientcaregiverlink: { where: { consent_status: 'GRANTED' } }
+                            patientcaregiverlink: { where: { consent_status: 'GRANTED', revoked_at: null } }
                         }
                     },
                     patientaccountlink: {
-                        where: { consent_status: 'GRANTED' },
+                        where: { consent_status: 'GRANTED', revoked_at: null },
                         select: {
                             relationship_type: true,
                             relationship_label: true,
@@ -126,7 +245,7 @@ exports.getPatient = async (req, res, next) => {
                             select: {
                                 ...USER_BRIEF,
                                 avatar_url: true,
-                                caregiverprofile: { select: { caregiver_type: true, volunteer_status: true, training_status: true } }
+                                caregiverprofile: { select: { caregiver_type: true, ngo_recognition_status: true, recognized_by: true, recognized_at: true } }
                             }
                         }
                     }

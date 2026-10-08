@@ -6,11 +6,14 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/async_states.dart';
 import '../../../../core/widgets/saathi_card.dart';
+import '../../../../core/widgets/user_avatar.dart';
 import '../../../auth/services/auth_state.dart';
 import '../../../shared/calls/call_launcher.dart';
 import '../models/care_contact.dart';
 import '../services/chat_service.dart';
+import '../../../shared/helpline/helpline_screen.dart';
 import 'chat_screen.dart';
+import 'conversations_screen.dart';
 
 /// "My Care Team": NGO staff and linked family caregivers for one patient.
 /// Tap a person to chat; use the icons to call. [embedded] is true when shown
@@ -93,6 +96,30 @@ class _CareTeamScreenState extends State<CareTeamScreen> {
                 Text(S.t('careTeamSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
                 const SizedBox(height: 16),
               ],
+              SaathiCard(
+                rose: true,
+                onTap: () => AppRoutes.push(context, const HelplineScreen()),
+                child: Row(
+                  children: [
+                    const Icon(Icons.support_agent, color: AppColors.roseText),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(S.t('ngoHelpline'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5))),
+                    const Icon(Icons.chevron_right, color: AppColors.roseText),
+                  ],
+                ),
+              ),
+              if (widget.embedded)
+                SaathiCard(
+                  onTap: () => AppRoutes.push(context, const ConversationsScreen(embedded: false)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.forum_outlined, color: AppColors.primary),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(S.t('allConversations'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5))),
+                      const Icon(Icons.chevron_right, color: AppColors.primary),
+                    ],
+                  ),
+                ),
               if (_loading && contacts == null)
                 const LoadingView()
               else if (_failed || contacts == null)
@@ -108,7 +135,19 @@ class _CareTeamScreenState extends State<CareTeamScreen> {
           ),
         );
         if (widget.embedded) return body;
-        return Scaffold(appBar: AppBar(title: Text(S.t('careTeam'))), body: SafeArea(child: body));
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(S.t('careTeam')),
+            actions: [
+              IconButton(
+                tooltip: S.t('messages'),
+                icon: const Icon(Icons.forum_outlined),
+                onPressed: () => AppRoutes.push(context, const ConversationsScreen(embedded: false)),
+              ),
+            ],
+          ),
+          body: SafeArea(child: body),
+        );
       },
     );
   }
@@ -119,11 +158,7 @@ class _CareTeamScreenState extends State<CareTeamScreen> {
       onTap: () => _openChat(c),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: c.isStaff || c.isPatient ? AppColors.primaryLight : AppColors.roseLight,
-            child: Text(c.initial, style: TextStyle(fontWeight: FontWeight.bold, color: c.isStaff || c.isPatient ? AppColors.primaryDeep : AppColors.roseText)),
-          ),
+          UserAvatar(initial: c.initial, radius: 22, teal: c.isStaff || c.isPatient),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

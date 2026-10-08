@@ -14,13 +14,13 @@ const getUserRoles = async (userId) => {
     if (await isCentralCounsellor(userId)) roles.push('STAFF');
 
     const isPatient = await prisma.patientaccountlink.findFirst({
-        where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] }, consent_status: 'GRANTED' }
+        where: { user_id: userId, relationship_type: { in: ['SELF', 'DELEGATE'] }, consent_status: 'GRANTED', revoked_at: null }
     });
     if (isPatient) roles.push('PATIENT');
 
     // Caregiver = linked to a patient OR registered caregiver profile
     const [isCaregiverLink, hasCaregiverProfile] = await Promise.all([
-        prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: userId, consent_status: 'GRANTED' } }),
+        prisma.patientcaregiverlink.findFirst({ where: { caregiver_user_id: userId, consent_status: 'GRANTED', revoked_at: null } }),
         prisma.caregiverprofile.findUnique({ where: { user_id: userId } })
     ]);
     if (isCaregiverLink || hasCaregiverProfile) roles.push('CAREGIVER');
@@ -65,12 +65,30 @@ const generateRefreshToken = async (userId) => {
     return rawToken;
 };
 
+// ---- OTP input hardening --------------------------------------------------
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const OTP_REGEX = /^\d{6}$/;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;   // one OTP per email per minute (on top of the per-IP limiter)
+
+// Returns the normalised email or null. Rejects non-strings (e.g. JSON arrays/objects).
+const normalizeEmail = (value) => {
+    if (typeof value !== 'string') return null;
+    const email = value.trim().toLowerCase();
+    if (email.length > 254 || !EMAIL_REGEX.test(email)) return null;
+    return email;
+};
+
 exports.requestOtp = async (req, res, next) => {
     try {
-        const { email } = req.body;
-        if (!email) return res.status(400).json({ status: 'error', message: 'Email is required.' });
+        const cleanEmail = normalizeEmail(req.body?.email);
+        if (!cleanEmail) return res.status(400).json({ status: 'error', message: 'A valid email address is required.' });
 
-        const cleanEmail = email.trim().toLowerCase();
+        // Per-email throttle: stops someone mail-bombing one address from many IPs.
+        const lastOtp = await prisma.authotp.findFirst({ where: { email: cleanEmail }, orderBy: { created_at: 'desc' } });
+        if (lastOtp && Date.now() - new Date(lastOtp.created_at).getTime() < OTP_RESEND_COOLDOWN_MS) {
+            return res.status(429).json({ status: 'error', message: 'Please wait a minute before requesting another code.' });
+        }
+
         const rawOtp = crypto.randomInt(100000, 1000000).toString();
         const otpHash = await argon2.hash(rawOtp);
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -99,10 +117,11 @@ exports.requestOtp = async (req, res, next) => {
 
 exports.verifyOtp = async (req, res, next) => {
     try {
-        const { email, otp } = req.body;
-        if (!email || !otp) return res.status(400).json({ status: 'error', message: 'Email and OTP required.' });
-
-        const cleanEmail = email.trim().toLowerCase();
+        const cleanEmail = normalizeEmail(req.body?.email);
+        const otpInput = (typeof req.body?.otp === 'string' || typeof req.body?.otp === 'number') ? String(req.body.otp).trim() : '';
+        if (!cleanEmail || !OTP_REGEX.test(otpInput)) {
+            return res.status(400).json({ status: 'error', message: 'A valid email and a 6-digit OTP are required.' });
+        }
 
         const otpRecord = await prisma.authotp.findFirst({
             where: { email: cleanEmail },
@@ -121,7 +140,7 @@ exports.verifyOtp = async (req, res, next) => {
             return res.status(401).json({ status: 'error', message: 'OTP expired.' });
         }
 
-        const isValid = await argon2.verify(otpRecord.otp_hash, otp.toString().trim());
+        const isValid = await argon2.verify(otpRecord.otp_hash, otpInput);
         if (!isValid) {
             await prisma.authotp.update({
                 where: { id: otpRecord.id },
@@ -200,10 +219,11 @@ exports.updateProfile = async (req, res, next) => {
             await prisma.caregiverprofile.upsert({
                 where: { user_id: userId },
                 update: { caregiver_type },
+                // New caregivers always start NOT_RECOGNIZED (the schema default); only the NGO
+                // can recognise them via PATCH /api/admin/caregivers/:user_id/recognition.
                 create: {
                     user_id: userId,
-                    caregiver_type,
-                    volunteer_status: caregiver_type === 'VOLUNTEER' ? 'PENDING' : 'APPROVED'
+                    caregiver_type
                 }
             });
         }

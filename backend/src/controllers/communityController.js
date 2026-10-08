@@ -7,7 +7,13 @@ const supabase = (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
     : null;
 
+// PUBLIC posts: public bucket (permanent public URL is fine - the post is public).
+// PRIVATE posts: PRIVATE bucket + short-lived signed URLs, so the media can never be fetched
+// just by knowing/guessing a URL. Create BOTH buckets in Supabase; the private one must NOT be public.
 const MEDIA_BUCKET = 'community_media';
+const PRIVATE_MEDIA_BUCKET = process.env.SUPABASE_PRIVATE_MEDIA_BUCKET || 'community_media_private';
+const PRIVATE_PREFIX = 'private://';
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
 const MAX_MEDIA_FILES = 5;
 const VALID_POST_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'POLL'];
 const VALID_VISIBILITIES = ['PUBLIC', 'PRIVATE'];
@@ -33,8 +39,29 @@ const getAccessiblePost = async (postId, userId) => {
     return null;
 };
 
+// Turns stored media references into URLs a client can open.
+//   public URL            -> returned as is
+//   private://<path>      -> a signed URL valid for one hour (only ever produced by handlers that
+//                            have already authorised the reader)
+const resolveMediaUrls = async (mediaUrls) => {
+    const out = [];
+    for (const url of Array.isArray(mediaUrls) ? mediaUrls : []) {
+        if (typeof url === 'string' && url.startsWith(PRIVATE_PREFIX)) {
+            if (!supabase) continue;
+            const { data, error } = await supabase.storage
+                .from(PRIVATE_MEDIA_BUCKET)
+                .createSignedUrl(url.slice(PRIVATE_PREFIX.length), SIGNED_URL_TTL_SECONDS);
+            if (!error && data?.signedUrl) out.push(data.signedUrl);
+        } else {
+            out.push(url);
+        }
+    }
+    return out;
+};
+
 exports.createPost = async (req, res, next) => {
     const uploadedPaths = [];
+    let uploadBucket = MEDIA_BUCKET;
     try {
         const userId = req.user.userId;
         const { post_type = 'TEXT', visibility = 'PUBLIC' } = req.body;
@@ -105,12 +132,15 @@ exports.createPost = async (req, res, next) => {
         if (files.length > 0) {
             if (!supabase) return res.status(500).json({ status: 'error', message: 'Storage not configured.' });
 
+            const isPrivatePost = visibility === 'PRIVATE';
+            uploadBucket = isPrivatePost ? PRIVATE_MEDIA_BUCKET : MEDIA_BUCKET;
+
             for (const file of files) {
                 const fileExt = file.originalname?.split('.').pop() || 'bin';
                 const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
                 const { error: uploadError } = await supabase.storage
-                    .from(MEDIA_BUCKET)
+                    .from(uploadBucket)
                     .upload(fileName, file.buffer, {
                         contentType: file.mimetype,
                         upsert: false
@@ -119,8 +149,13 @@ exports.createPost = async (req, res, next) => {
                 if (uploadError) throw uploadError;
                 uploadedPaths.push(fileName);
 
-                const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
-                mediaUrls.push(data.publicUrl);
+                if (isPrivatePost) {
+                    // Never store a permanent public URL for private media - store a reference only.
+                    mediaUrls.push(`${PRIVATE_PREFIX}${fileName}`);
+                } else {
+                    const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
+                    mediaUrls.push(data.publicUrl);
+                }
             }
         }
 
@@ -147,12 +182,12 @@ exports.createPost = async (req, res, next) => {
         return res.status(201).json({
             status: 'success',
             message: visibility === 'PRIVATE' ? privateMessage : publicMessage,
-            data: newPost
+            data: { ...newPost, media_urls: await resolveMediaUrls(newPost.media_urls) }
         });
     } catch (error) {
         // Don't leave orphaned media behind if the post could not be saved.
         if (uploadedPaths.length > 0 && supabase) {
-            await supabase.storage.from(MEDIA_BUCKET).remove(uploadedPaths).catch(() => {});
+            await supabase.storage.from(uploadBucket).remove(uploadedPaths).catch(() => {});
         }
         next(error);
     }
@@ -179,13 +214,15 @@ exports.getPublicFeed = async (req, res, next) => {
             }
         });
 
-        const formattedFeed = posts.map(post => ({
+        const resolvedMedia = await Promise.all(posts.map(p => resolveMediaUrls(p.media_urls)));
+
+        const formattedFeed = posts.map((post, i) => ({
             id: post.id,
             author_id: post.author_id,
             author_name: post.author?.email?.split('@')[0] || 'Saathi User',
             post_type: post.post_type,
             content: post.content,
-            media_urls: post.media_urls,
+            media_urls: resolvedMedia[i],
             created_at: post.created_at,
             likes_count: post._count.postlike,
             comments_count: post._count.postcomment,
@@ -219,7 +256,8 @@ exports.getModerationQueue = async (req, res, next) => {
             include: { author: { select: { id: true, email: true } } },
             orderBy: { created_at: 'desc' }
         });
-        return res.status(200).json({ status: 'success', data: posts });
+        const data = await Promise.all(posts.map(async (p) => ({ ...p, media_urls: await resolveMediaUrls(p.media_urls) })));
+        return res.status(200).json({ status: 'success', data });
     } catch (error) { next(error); }
 };
 
@@ -250,7 +288,7 @@ exports.moderatePost = async (req, res, next) => {
             data: { status, moderator_feedback: moderator_feedback || null, moderator_id: userId }
         });
 
-        return res.status(200).json({ status: 'success', data: updatedPost });
+        return res.status(200).json({ status: 'success', data: { ...updatedPost, media_urls: await resolveMediaUrls(updatedPost.media_urls) } });
     } catch (error) { next(error); }
 };
 

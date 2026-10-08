@@ -6,7 +6,7 @@ import '../../../../core/widgets/saathi_card.dart';
 import '../../dashboard/models/care_event.dart';
 import '../../dashboard/widgets/care_event_labels.dart';
 
-/// Today's medication doses (events of type MEDICATION_DOSE).
+/// The day's medication doses (events of type MEDICATION_DOSE).
 class MedicineListCard extends StatelessWidget {
   final List<CareEvent> events;
   const MedicineListCard({super.key, required this.events});

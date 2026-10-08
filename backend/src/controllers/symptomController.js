@@ -1,6 +1,7 @@
 const prisma = require('../config/db');
 const crypto = require('crypto');
 const { verifyPatientDataEventAccess } = require('../services/authorizationService');
+const { raiseOrUpdateAlert, getAlertRecipientUserIds } = require('../services/alertService');
 const { sendEmergencyAlertNotification } = require('../config/firebase');
 const { getISTDayBoundaries } = require('../utils/timezoneHelper');
 const { isUuid } = require('../utils/validators');
@@ -85,32 +86,42 @@ exports.submitCheckIn = async (req, res, next) => {
                 // Evaluate for severe deterioration
                 const highSeverityObs = observationData.filter(o => o.severity && o.severity >= 8);
                 if (highSeverityObs.length > 0) {
-                    const alert = await tx.alert.create({
-                        data: {
-                            patient_id,
-                            type: 'DETERIORATION',
-                            severity: 'HIGH',
-                            status: 'OPEN',
-                            source_type: 'CHECK_IN',
-                            source_id: event.id
+                    // Deduplicated: an already-open alert for this patient/rule gets an AlertUpdate
+                    // instead of a second alert (see services/alertService.js).
+                    const outcome = await raiseOrUpdateAlert(tx, {
+                        patientId: patient_id,
+                        type: 'DETERIORATION',
+                        ruleId: 'SEVERE_SYMPTOM_SCORE',
+                        ruleVersion: 'v1',
+                        severity: 'HIGH',
+                        sourceType: 'CHECK_IN',
+                        sourceId: event.id,
+                        actorId: userId,
+                        updateNote: 'Another severe check-in was recorded.'
+                    });
+
+                    if (outcome.notify) {
+                        // Who must hear about it: account holders + caregivers + central NGO
+                        // (revoked links excluded; the person who recorded the check-in is skipped).
+                        const recipientIds = await getAlertRecipientUserIds(tx, patient_id, userId);
+
+                        let tokens = [];
+                        if (recipientIds.length > 0) {
+                            // Record who was alerted (shows up in the NGO admin alert detail view).
+                            await tx.alertrecipient.createMany({
+                                data: recipientIds.map(id => ({ alert_id: outcome.alert.id, recipient_user_id: id })),
+                                skipDuplicates: true
+                            });
+
+                            const recipientUsers = await tx.useraccount.findMany({
+                                where: { id: { in: recipientIds } },
+                                select: { fcm_token: true }
+                            });
+                            tokens = [...new Set(recipientUsers.map(u => u.fcm_token).filter(Boolean))];
                         }
-                    });
 
-                    const patient = await tx.patient.findUnique({ where: { id: patient_id } });
-
-                    const alertRecipients = await tx.patientaccountlink.findMany({
-                        where: { patient_id, consent_status: 'GRANTED' },
-                        include: { useraccount_patientaccountlink_user_idTouseraccount: true }
-                    });
-
-                    pendingAlert = {
-                        alertId: alert.id,
-                        patientName: patient?.full_name || 'A patient',
-                        tokens: alertRecipients
-                            .filter(r => r.user_id !== userId)
-                            .map(r => r.useraccount_patientaccountlink_user_idTouseraccount?.fcm_token)
-                            .filter(Boolean)
-                    };
+                        pendingAlert = { alertId: outcome.alert.id, tokens };
+                    }
                 }
 
                 return event;
@@ -127,13 +138,15 @@ exports.submitCheckIn = async (req, res, next) => {
         }
 
         if (pendingAlert) {
-            const { alertId, patientName, tokens } = pendingAlert;
+            const { alertId, tokens } = pendingAlert;
             tokens.forEach(fcmToken => {
+                // PRIVACY: no patient name, symptom or severity in the notification text.
+                // Details are only visible inside the authenticated app.
                 sendEmergencyAlertNotification(fcmToken, {
-                    title: 'Severe symptoms reported',
+                    title: 'Care circle alert',
                     alertId,
                     patientId: patient_id,
-                    body: `${patientName} has reported severe symptoms and requires immediate attention.`
+                    body: 'Someone in your Saathi care circle may need attention.'
                 }).catch(console.error);
             });
         }

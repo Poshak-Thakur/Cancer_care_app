@@ -1,13 +1,15 @@
 const { isUuid } = require('../utils/validators');
-const { getPatientAccessContext, isCentralCounsellor } = require('../services/authorizationService');
+const { getPatientAccessContext, contextHasScope, isCentralCounsellor } = require('../services/authorizationService');
 
 /**
  * Patient-scoped access guard. ALL rules live in authorizationService; this
  * file only translates the result into HTTP + req.accessContext.
  *
  *   Central NGO head/counsellor -> global patient access (role STAFF)
- *   Patient (SELF/DELEGATE)     -> own / delegated patient access (role PATIENT)
- *   Caregiver                   -> GRANTED link + access_scopes (role CAREGIVER)
+ *   Patient (SELF/DELEGATE)     -> own / delegated access, limited to the link's scopes (role PATIENT)
+ *   Caregiver                   -> GRANTED link, limited to the link's scopes (role CAREGIVER)
+ *
+ * Usage: requirePatientAccess('SYMPTOM_WRITE') - see constants/accessScopes.js
  */
 const requirePatientAccess = (requiredScope = null) => {
     return async (req, res, next) => {
@@ -27,11 +29,10 @@ const requirePatientAccess = (requiredScope = null) => {
                 return res.status(403).json({ status: 'error', message: 'Unauthorized access to this patient record.' });
             }
 
-            if (ctx.role === 'CAREGIVER' && requiredScope) {
-                const scopes = Array.isArray(ctx.link.access_scopes) ? ctx.link.access_scopes : [];
-                if (!scopes.includes('ALL') && !scopes.includes(requiredScope)) {
-                    return res.status(403).json({ status: 'error', message: `Access denied. Requires scope: ${requiredScope}` });
-                }
+            // Scopes are enforced for EVERY non-NGO role (patient, delegate, caregiver).
+            // A relationship alone is not enough - the link must hold the required scope.
+            if (requiredScope && !contextHasScope(ctx, requiredScope)) {
+                return res.status(403).json({ status: 'error', message: `Access denied. Requires scope: ${requiredScope}` });
             }
 
             req.accessContext = ctx;
