@@ -3,6 +3,7 @@ import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/storage/claim_code_storage.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/dragonfly_mark.dart';
@@ -10,10 +11,14 @@ import '../../../core/widgets/lang_toggle.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_state.dart';
 import '../widgets/role_card.dart';
+import 'claim_code_screen.dart';
 import 'otp_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// True after the user entered a Saathi code: patient only, same email and
+  /// OTP steps; the code is claimed once the OTP is verified.
+  final bool claimMode;
+  const LoginScreen({super.key, this.claimMode = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -22,9 +27,20 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   String _role = 'patient';
+  String? _claimCode;
   bool _showError = false;
   String? _serverError;
   bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.claimMode) {
+      ClaimCodeStorage.read().then((c) {
+        if (mounted) setState(() => _claimCode = c);
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -44,6 +60,9 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     final email = _email.text.trim().toLowerCase();
+    // The normal "Get started" path never carries a code left over from an
+    // earlier attempt.
+    if (!widget.claimMode) await ClaimCodeStorage.clear();
     setState(() {
       _showError = false;
       _serverError = null;
@@ -61,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     if (!mounted) return;
     AuthState.email = email;
-    AuthState.role = _role;
+    AuthState.role = widget.claimMode ? 'patient' : _role;
     setState(() => _sending = false);
     AppRoutes.push(context, const OtpScreen());
   }
@@ -95,6 +114,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary, height: 1.45)),
                 const SizedBox(height: 26),
 
+                if (widget.claimMode) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.vpn_key_outlined, size: 18, color: AppColors.roseText),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(S.t('claimUsing'), style: const TextStyle(fontSize: 13.5, color: AppColors.roseText, fontWeight: FontWeight.w600)),
+                        ),
+                        if (_claimCode != null)
+                          Text('••••${_claimCode!.substring(_claimCode!.length - 2)}',
+                              style: const TextStyle(fontSize: 13.5, color: AppColors.roseText, letterSpacing: 1)),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: Text(S.t('claimChange'), style: const TextStyle(color: AppColors.roseText, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                ] else ...[
                 Text(S.t('iAmA'),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
                 const SizedBox(height: 10),
@@ -122,6 +164,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
                 const SizedBox(height: 22),
+                ],
 
                 Text(S.t('emailLabel'),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
@@ -177,7 +220,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       )
-                    : PrimaryButton(label: S.t('sendOtp'), onPressed: _sendOtp),
+                    : PrimaryButton(label: widget.claimMode ? S.t('sendOtp') : S.t('getStarted'), onPressed: _sendOtp),
+                if (!widget.claimMode) ...[
+                  const SizedBox(height: 10),
+                  SecondaryButton(
+                    label: S.t('haveCode'),
+                    onPressed: _sending ? () {} : () => AppRoutes.push(context, const ClaimCodeScreen()),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Text(S.t('otpNote'),
                     textAlign: TextAlign.center,

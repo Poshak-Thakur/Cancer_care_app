@@ -22,6 +22,10 @@ router.post('/posts', upload.array('media', 5), communityController.createPost);
 router.get('/moderation-queue', communityController.getModerationQueue);
 router.patch('/posts/:id/moderate', communityController.moderatePost);
 
+// Reports: any signed-in user can report; only the central NGO reviews (checked in the controller).
+router.post('/posts/:id/report', communityController.reportPost);
+router.patch('/reports/:id/status', communityController.updateReportStatus);
+
 // Post Engagement
 router.post('/posts/:id/like', communityController.toggleLike);
 router.post('/posts/:id/comment', communityController.addComment);
@@ -30,4 +34,4 @@ router.get('/posts/:id/comments', communityController.getComments);
 // Poll Interaction
 router.post('/poll/:option_id/vote', communityController.votePoll);
 
-module.exports = router;
+module.exports = router;

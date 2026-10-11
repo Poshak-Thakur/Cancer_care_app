@@ -123,6 +123,31 @@ class S {
     // Auth & onboarding
     'tagline': ['No one should walk through this alone', 'इस सफ़र में कोई अकेला न चले'],
     'welcomeTitle': ['Welcome to Saathi', 'Saathi में आपका स्वागत है'],
+    'haveCode': ['I have a code from Saathi', 'मेरे पास Saathi का कोड है'],
+    'claimTitle': ['Enter your Saathi code', 'अपना Saathi कोड दर्ज करें'],
+    'claimSub': [
+      'Saathi has already set up your record. Enter the 8-character code they gave you, then sign in with your email.',
+      'Saathi ने आपका रिकॉर्ड पहले से तैयार किया है। उनका दिया 8 अक्षरों का कोड दर्ज करें, फिर अपने ईमेल से साइन इन करें।'
+    ],
+    'claimCodeLabel': ['Saathi code', 'Saathi कोड'],
+    'claimCodeHint': ['e.g. A1B2C3D4', 'जैसे A1B2C3D4'],
+    'claimCodeInvalid': ['The code has 8 letters or numbers.', 'कोड में 8 अक्षर या अंक होते हैं।'],
+    'claimContinue': ['Continue', 'आगे बढ़ें'],
+    'claimUsing': ['Using Saathi code', 'Saathi कोड इस्तेमाल हो रहा है'],
+    'claimChange': ['Change', 'बदलें'],
+    'claimNoCode': ["I don't have a code: create my profile", 'मेरे पास कोड नहीं है: मेरी प्रोफ़ाइल बनाएं'],
+    'claimInvalid': ['Invalid or expired code.', 'कोड गलत है या समाप्त हो गया है।'],
+    'claimAlreadySetUp': ['This record is already set up. Please contact Saathi.', 'यह रिकॉर्ड पहले से तैयार है। कृपया Saathi से संपर्क करें।'],
+    'claimTooMany': ['Too many attempts, try again later.', 'बहुत ज़्यादा कोशिशें हुईं, कृपया बाद में दोबारा कोशिश करें।'],
+    'claimBlockedTitle': ["We couldn't link your record", 'हम आपका रिकॉर्ड जोड़ नहीं सके'],
+    'aboutPatient': ['About', 'के बारे में'],
+    'claimRetryFailed': ["Couldn't continue. Please check your connection and try again.", 'आगे नहीं बढ़ सके। कृपया कनेक्शन जांचें और दोबारा कोशिश करें।'],
+    'editPatientRecord': ['Edit patient record', 'मरीज़ का रिकॉर्ड बदलें'],
+    'editPatientRecordSub': [
+      'Check the details Saathi has for you and correct anything that is wrong.',
+      'Saathi के पास आपकी जो जानकारी है उसे जांचें और गलत हो तो सुधारें।'
+    ],
+    'cancerTypeOnly': ['Cancer type', 'कैंसर का प्रकार'],
     'iAmA': ['I am signing in as', 'मैं इस रूप में साइन इन कर रहा/रही हूँ'],
     'rolePatient': ['Patient', 'मरीज़'],
     'rolePatientSub': ['Managing my own care', 'अपनी देखभाल स्वयं संभाल रहा/रही हूँ'],
@@ -424,6 +449,60 @@ class S {
     'actingAs': ['Acting as', 'इनकी ओर से'],
     'recognizedBadge': ['Recognized by the NGO', 'NGO द्वारा मान्यता प्राप्त'],
     'awaitingRecognition': ['Awaiting NGO recognition', 'NGO की मान्यता की प्रतीक्षा'],
+
+    // Dynamic check-in form
+    'formLoadFailed': ["Couldn't load today's check-in.", 'आज की जांच लोड नहीं हो सकी।'],
+    'formNeedsUpdate': ['This check-in has a question this version of the app cannot show. Please update the app.', 'इस जांच में एक ऐसा प्रश्न है जो ऐप का यह संस्करण नहीं दिखा सकता। कृपया ऐप अपडेट करें।'],
+    'fieldRequired': ['This question is required.', 'यह प्रश्न ज़रूरी है।'],
+    'fieldNumberInvalid': ['Enter a valid number.', 'कृपया सही संख्या दर्ज करें।'],
+    'fieldWholeNumber': ['Enter a whole number.', 'कृपया पूर्ण संख्या दर्ज करें।'],
+    'yesLabel': ['Yes', 'हाँ'],
+    'noLabel': ['No', 'नहीं'],
+    'notAnsweredLabel': ['Not answered', 'उत्तर नहीं दिया'],
+    'clearAnswer': ['Clear', 'हटाएं'],
+    'checkinInvalid': ['Some answers are not valid. Please check them and try again.', 'कुछ उत्तर सही नहीं हैं। कृपया जांचकर फिर कोशिश करें।'],
+    // Help Now
+    'helpNow': ['Help now', 'अभी मदद चाहिए'],
+    'helpNowSub': ['Tell your care circle you need help', 'अपनी केयर टीम को बताएं कि आपको मदद चाहिए'],
+    'helpNowSubFor': ['Tell the care circle this patient needs help', 'केयर टीम को बताएं कि इस मरीज़ को मदद चाहिए'],
+    'helpNowConfirmTitle': ['Ask for help now?', 'क्या अभी मदद मांगनी है?'],
+    'helpNowConfirmBody': ['Your care team and care circle will be notified straight away.', 'आपकी केयर टीम और परिवार को तुरंत सूचित किया जाएगा।'],
+    'helpNowNoteHint': ['Add a short note (optional)', 'एक छोटा संदेश जोड़ें (वैकल्पिक)'],
+    'helpNowSend': ['Send help request', 'मदद का अनुरोध भेजें'],
+    'helpNowSent': ['Help request sent. Your care circle has been told.', 'मदद का अनुरोध भेज दिया गया। आपकी केयर टीम को बता दिया गया है।'],
+    'helpNowMerged': ['You already have an open help request. It has been updated.', 'आपका एक मदद अनुरोध पहले से खुला है। उसे अपडेट कर दिया गया है।'],
+    'helpNowReplay': ['This help request was already recorded.', 'यह मदद अनुरोध पहले ही दर्ज हो चुका है।'],
+    'helpNowFailed': ["Couldn't send the help request. Please try again.", 'मदद का अनुरोध नहीं भेजा जा सका। कृपया फिर कोशिश करें।'],
+    'cancelHelpRequest': ['Cancel help request', 'मदद का अनुरोध रद्द करें'],
+    'cancelHelpTitle': ['Cancel this help request?', 'क्या यह मदद अनुरोध रद्द करें?'],
+    'cancelHelpBody': ['Only do this if you no longer need help.', 'यह तभी करें जब अब मदद की ज़रूरत न हो।'],
+    'keepRequest': ['Keep it', 'रहने दें'],
+    'helpCancelled': ['Help request cancelled.', 'मदद का अनुरोध रद्द कर दिया गया।'],
+    'helpCancelNotAllowed': ["This request can't be cancelled any more.", 'यह अनुरोध अब रद्द नहीं किया जा सकता।'],
+    'helpCancelRequesterOnly': ['Only the person who sent this request can cancel it.', 'इस अनुरोध को केवल भेजने वाला ही रद्द कर सकता है।'],
+    'helpCancelFailed': ["Couldn't cancel the request. Please try again.", 'अनुरोध रद्द नहीं हो सका। कृपया फिर कोशिश करें।'],
+    // Alert cards
+    'alertHelpMineTitle': ['You asked for help', 'आपने मदद मांगी है'],
+    'alertHelpMineSub': ['Your care team has been told and will follow up', 'आपकी केयर टीम को बता दिया गया है और वे संपर्क करेंगे'],
+    'alertHelpOtherTitle': ['A help request is open', 'एक मदद अनुरोध खुला है'],
+    'alertHelpOtherSub': ['Someone in the care circle asked for help', 'केयर टीम में से किसी ने मदद मांगी है'],
+    'alertMissedMedTitle': ['A medicine may have been missed', 'शायद एक दवा छूट गई है'],
+    'alertMissedMedSub': ['The care team can follow up with you', 'केयर टीम आपसे संपर्क कर सकती है'],
+    'alertMissedFollowTitle': ['A follow-up was missed', 'एक फॉलो-अप छूट गया है'],
+    'alertMissedFollowSub': ['The care team can help to reschedule it', 'केयर टीम इसे दोबारा तय करने में मदद कर सकती है'],
+    'alertGenericTitle': ['Care alert', 'केयर अलर्ट'],
+    'alertGenericSub': ['Your care team has been told', 'आपकी केयर टीम को बता दिया गया है'],
+    'alertStatusLabel': ['Status', 'स्थिति'],
+    'alertStatusOpen': ['Open', 'खुला'],
+    'alertStatusAcknowledged': ['Seen by the care team', 'केयर टीम ने देखा'],
+    'alertStatusInProgress': ['Care team is following up', 'केयर टीम संपर्क में है'],
+    'alertStatusResolved': ['Resolved', 'सुलझ गया'],
+    'alertStatusCancelled': ['Cancelled', 'रद्द'],
+    'alertStatusEscalated': ['Escalated', 'आगे बढ़ाया गया'],
+    'alertDetailTitle': ['Alert', 'अलर्ट'],
+    'alertNoLongerOpen': ['This alert is no longer open.', 'यह अलर्ट अब खुला नहीं है।'],
+    'alertLoadFailed': ["Couldn't load this alert right now.", 'अभी यह अलर्ट लोड नहीं हो सका।'],
+    'criticalAlertFallback': ['Someone in your Saathi care circle may need attention.', 'आपकी साथी केयर टीम में किसी को ध्यान की ज़रूरत हो सकती है।'],
   };
 
   /// Looks up a label. An unknown key shows the key itself instead of crashing.
@@ -431,6 +510,12 @@ class S {
     final v = _t[key];
     return v == null ? key : v[Lang.isHindi.value ? 1 : 0];
   }
+
+
+  static String mustBeAtLeast(num n) => Lang.isHindi.value ? 'कम से कम $n होना चाहिए।' : 'Must be at least $n.';
+  static String mustBeAtMost(num n) => Lang.isHindi.value ? 'अधिकतम $n होना चाहिए।' : 'Must be at most $n.';
+  static String chooseAtLeast(int n) => Lang.isHindi.value ? 'कम से कम $n चुनें।' : 'Choose at least $n.';
+  static String chooseAtMost(int n) => Lang.isHindi.value ? 'अधिकतम $n चुनें।' : 'Choose at most $n.';
 
   static String unreadMessages(int n) => Lang.isHindi.value ? '$n नया संदेश' : (n == 1 ? '1 new message' : '$n new messages');
   static String medsSaved(int n) => Lang.isHindi.value ? '$n दवाइयाँ सेव हुईं' : (n == 1 ? '1 medicine saved' : '$n medicines saved');

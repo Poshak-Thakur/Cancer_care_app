@@ -32,7 +32,11 @@ const cooldownMs = () => {
  */
 const raiseOrUpdateAlert = async (tx, {
     patientId, type = 'DETERIORATION', ruleId, ruleVersion = 'v1', severity = 'HIGH',
-    sourceType, sourceId, actorId, updateNote
+    sourceType, sourceId, actorId, updateNote,
+    // Manual Help Now only (all optional; automatic alerts leave them out):
+    requestedByUserId = null,   // who pressed the button - stored on the alert
+    clientEventId = null,       // idempotency key of THIS press
+    useCooldown = true          // false: a press after the previous alert closed always starts a new alert
 }) => {
     // Serialise concurrent triggers for the same patient so two simultaneous check-ins
     // cannot both decide "no open alert" and create two alerts.
@@ -44,17 +48,17 @@ const raiseOrUpdateAlert = async (tx, {
         orderBy: { created_at: 'desc' }
     });
 
-    const addUpdate = (alertId, updateType, note) => tx.alertupdate.create({
-        data: { alert_id: alertId, created_by: actorId, type: updateType, note }
+    const addUpdate = (alertId, updateType, note, eventId = null) => tx.alertupdate.create({
+        data: { alert_id: alertId, created_by: actorId, type: updateType, note, ...(eventId ? { client_event_id: eventId } : {}) }
     });
 
     if (latest && ACTIVE_STATUSES.includes(latest.status)) {
-        await addUpdate(latest.id, 'NEW_TRIGGER', updateNote || 'The same alert condition was recorded again.');
+        await addUpdate(latest.id, 'NEW_TRIGGER', updateNote || 'The same alert condition was recorded again.', clientEventId);
         const alert = await tx.alert.update({ where: { id: latest.id }, data: { updated_at: now } });
         return { alert, created: false, reopened: false, notify: false };
     }
 
-    if (latest && latest.rule_cooldown_until && latest.rule_cooldown_until > now) {
+    if (useCooldown && latest && latest.rule_cooldown_until && latest.rule_cooldown_until > now) {
         await addUpdate(latest.id, 'REOPENED', updateNote || 'The alert condition recurred within the cooldown window.');
         const alert = await tx.alert.update({ where: { id: latest.id }, data: { status: 'OPEN', updated_at: now } });
         return { alert, created: false, reopened: true, notify: true };
@@ -70,7 +74,9 @@ const raiseOrUpdateAlert = async (tx, {
             source_id: sourceId || null,
             rule_id: ruleId,
             rule_version: ruleVersion,
-            rule_cooldown_until: new Date(now.getTime() + cooldownMs())
+            rule_cooldown_until: useCooldown ? new Date(now.getTime() + cooldownMs()) : null,
+            requested_by_user_id: requestedByUserId,
+            client_event_id: clientEventId
         }
     });
     return { alert, created: true, reopened: false, notify: true };

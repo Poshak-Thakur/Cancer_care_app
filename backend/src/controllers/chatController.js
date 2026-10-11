@@ -210,13 +210,26 @@ exports.openThread = async (req, res, next) => {
         });
 
         if (!conversation) {
-            conversation = await prisma.chatconversation.create({
-                data: {
-                    patient_id: patientId,
-                    participant_one_id: userId,
-                    participant_two_id: participant_id
-                }
-            });
+            // Participants are stored in a CONSISTENT order (smaller id first) so the database unique
+            // constraints (one conversation per pair + patient context) cannot be bypassed by
+            // swapping the two ids.
+            const [first, second] = [userId, participant_id].map((id) => id.toLowerCase()).sort();
+            try {
+                conversation = await prisma.chatconversation.create({
+                    data: {
+                        patient_id: patientId,
+                        participant_one_id: first,
+                        participant_two_id: second
+                    }
+                });
+            } catch (createError) {
+                // Two simultaneous requests: the unique constraint let one win - return that conversation.
+                if (createError.code !== 'P2002') throw createError;
+                conversation = await prisma.chatconversation.findFirst({
+                    where: { patient_id: patientId, participant_one_id: first, participant_two_id: second }
+                });
+                if (!conversation) throw createError;
+            }
         }
 
         return res.status(200).json({ status: 'success', data: conversation });
@@ -244,6 +257,7 @@ exports.getConversations = async (req, res, next) => {
             include: {
                 participant_one: { select: { id: true, email: true, full_name: true } },
                 participant_two: { select: { id: true, email: true, full_name: true } },
+                patient: { select: { id: true, full_name: true } },   // null for patientless NGO helpline threads
                 messages: { orderBy: { created_at: 'desc' }, take: 1 }
             }
         });
@@ -272,7 +286,26 @@ exports.getConversations = async (req, res, next) => {
         const activityOf = (c) => new Date(c.messages[0]?.created_at || c.created_at).getTime();
         conversations.sort((a, b) => activityOf(b) - activityOf(a));
 
-        return res.status(200).json({ status: 'success', data: conversations });
+        // unread_count = messages from the OTHER participant that are still unread. ONE grouped query
+        // for all returned conversations (never one query per conversation).
+        const unreadByConversation = new Map();
+        if (conversations.length > 0) {
+            const groups = await prisma.chatmessage.groupBy({
+                by: ['conversation_id'],
+                where: {
+                    conversation_id: { in: conversations.map((c) => c.id) },
+                    is_read: false,
+                    sender_id: { not: userId }
+                },
+                _count: { _all: true }
+            });
+            groups.forEach((g) => unreadByConversation.set(g.conversation_id, g._count._all));
+        }
+
+        return res.status(200).json({
+            status: 'success',
+            data: conversations.map((c) => ({ ...c, unread_count: unreadByConversation.get(c.id) || 0 }))
+        });
     } catch (error) { next(error); }
 };
 

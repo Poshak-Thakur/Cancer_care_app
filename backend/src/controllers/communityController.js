@@ -2,6 +2,8 @@ const prisma = require('../config/db');
 const { createClient } = require('@supabase/supabase-js');
 const { isCentralCounsellor } = require('../services/authorizationService');
 const { isUuid } = require('../utils/validators');
+const HttpError = require('../utils/httpError');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
 
 const supabase = (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY))
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
@@ -239,6 +241,121 @@ exports.getPublicFeed = async (req, res, next) => {
     } catch (error) { next(error); }
 };
 
+const MAX_REPORT_REASON_LENGTH = 1000;
+const MAX_MODERATOR_NOTE_LENGTH = 2000;
+const REPORT_REVIEW_STATUSES = ['REVIEWED', 'DISMISSED'];
+const REPORTER_BRIEF = { id: true, email: true, full_name: true };
+
+// POST /api/community/posts/:id/report   body: { reason }
+exports.reportPost = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.userId;
+        const raw = req.body ? req.body.reason : undefined;
+
+        if (!isUuid(id)) return res.status(400).json({ status: 'error', message: 'Invalid post id.' });
+        if (typeof raw !== 'string' || raw.trim() === '') {
+            return res.status(400).json({ status: 'error', message: 'A reason is required to report a post.' });
+        }
+        const reason = raw.trim();
+        if (reason.length > MAX_REPORT_REASON_LENGTH) {
+            return res.status(400).json({ status: 'error', message: `reason must be at most ${MAX_REPORT_REASON_LENGTH} characters.` });
+        }
+
+        // You can only report what you can see (hidden / private posts answer 404).
+        const post = await getAccessiblePost(id, userId);
+        if (!post) return res.status(404).json({ status: 'error', message: 'Post not found.' });
+        if (post.author_id === userId) {
+            return res.status(400).json({ status: 'error', message: 'You cannot report your own post.' });
+        }
+
+        const duplicate = () => res.status(409).json({
+            status: 'error',
+            code: 'ALREADY_REPORTED',
+            message: 'You have already reported this post. It is waiting for review.'
+        });
+
+        // One OPEN report per user per post (the database enforces it too - see the partial unique index).
+        const open = await prisma.communityreport.findFirst({ where: { post_id: id, reporter_id: userId, status: 'OPEN' } });
+        if (open) return duplicate();
+
+        let report;
+        try {
+            report = await prisma.$transaction(async (tx) => {
+                const created = await tx.communityreport.create({
+                    data: { post_id: id, reporter_id: userId, reason, status: 'OPEN' }
+                });
+                await recordAudit(tx, {
+                    actorId: userId,
+                    action: AUDIT_ACTIONS.COMMUNITY_REPORT_CREATED,
+                    targetResource: RESOURCES.COMMUNITY_REPORT,
+                    targetId: created.id,
+                    extra: { post_id: id },
+                    req
+                });
+                return created;
+            });
+        } catch (err) {
+            if (err.code === 'P2002') return duplicate(); // lost a race with an identical request
+            throw err;
+        }
+
+        return res.status(201).json({ status: 'success', message: 'Thank you. The NGO team will review this post.', data: report });
+    } catch (error) { next(error); }
+};
+
+// PATCH /api/community/reports/:id/status   body: { status: 'REVIEWED' | 'DISMISSED', moderator_note? }  (central NGO only)
+exports.updateReportStatus = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user.userId;
+        const { status } = req.body || {};
+
+        if (!isUuid(id)) return res.status(400).json({ status: 'error', message: 'Invalid report id.' });
+        if (!(await isNgoAuthority(userId))) {
+            return res.status(403).json({ status: 'error', message: 'Only the NGO counsellor can review reports.' });
+        }
+        if (!REPORT_REVIEW_STATUSES.includes(status)) {
+            return res.status(400).json({ status: 'error', message: `status must be one of: ${REPORT_REVIEW_STATUSES.join(', ')}.` });
+        }
+        let moderatorNote = null;
+        if (req.body.moderator_note !== undefined && req.body.moderator_note !== null) {
+            if (typeof req.body.moderator_note !== 'string') {
+                return res.status(400).json({ status: 'error', message: 'moderator_note must be a string.' });
+            }
+            moderatorNote = req.body.moderator_note.trim() || null;
+            if (moderatorNote && moderatorNote.length > MAX_MODERATOR_NOTE_LENGTH) {
+                return res.status(400).json({ status: 'error', message: `moderator_note must be at most ${MAX_MODERATOR_NOTE_LENGTH} characters.` });
+            }
+        }
+
+        const existing = await prisma.communityreport.findUnique({ where: { id } });
+        if (!existing) return res.status(404).json({ status: 'error', message: 'Report not found.' });
+
+        const updated = await prisma.$transaction(async (tx) => {
+            // Atomic: a report is reviewed once; only OPEN reports can change.
+            const changed = await tx.communityreport.updateMany({
+                where: { id, status: 'OPEN' },
+                data: { status, reviewed_by: userId, reviewed_at: new Date(), moderator_note: moderatorNote }
+            });
+            if (changed.count !== 1) {
+                throw new HttpError(409, 'This report has already been reviewed.', 'REPORT_ALREADY_REVIEWED');
+            }
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.COMMUNITY_REPORT_REVIEWED,
+                targetResource: RESOURCES.COMMUNITY_REPORT,
+                targetId: id,
+                extra: { post_id: existing.post_id, from: 'OPEN', to: status },
+                req
+            });
+            return tx.communityreport.findUnique({ where: { id } });
+        });
+
+        return res.status(200).json({ status: 'success', data: updated });
+    } catch (error) { next(error); }
+};
+
 exports.getModerationQueue = async (req, res, next) => {
     try {
         const userId = req.user.userId;
@@ -250,13 +367,30 @@ exports.getModerationQueue = async (req, res, next) => {
             where: {
                 OR: [
                     { visibility: 'PUBLIC', status: 'PENDING' },
-                    { visibility: 'PRIVATE' }
+                    { visibility: 'PRIVATE' },
+                    // Already-approved public posts that someone has reported and nobody has reviewed yet.
+                    { visibility: 'PUBLIC', status: 'APPROVED', communityreport: { some: { status: 'OPEN' } } }
                 ]
             },
-            include: { author: { select: { id: true, email: true } } },
+            include: {
+                author: { select: { id: true, email: true } },
+                communityreport: {
+                    where: { status: 'OPEN' },
+                    orderBy: { created_at: 'asc' },
+                    include: { reporter: { select: REPORTER_BRIEF } }
+                }
+            },
             orderBy: { created_at: 'desc' }
         });
-        const data = await Promise.all(posts.map(async (p) => ({ ...p, media_urls: await resolveMediaUrls(p.media_urls) })));
+        const data = await Promise.all(posts.map(async ({ communityreport, ...p }) => {
+            const reports = (communityreport || []).map(({ reporter, ...r }) => ({ ...r, reporter }));
+            return {
+                ...p,
+                media_urls: await resolveMediaUrls(p.media_urls),
+                open_reports_count: reports.length,
+                reports
+            };
+        }));
         return res.status(200).json({ status: 'success', data });
     } catch (error) { next(error); }
 };
@@ -280,15 +414,41 @@ exports.moderatePost = async (req, res, next) => {
             return res.status(400).json({ status: 'error', message: 'A compassionate moderator_feedback reason is required when rejecting a post.' });
         }
 
-        const existing = await prisma.communitypost.findUnique({ where: { id }, select: { id: true } });
+        const existing = await prisma.communitypost.findUnique({ where: { id }, select: { id: true, status: true } });
         if (!existing) return res.status(404).json({ status: 'error', message: 'Post not found.' });
 
-        const updatedPost = await prisma.communitypost.update({
-            where: { id },
-            data: { status, moderator_feedback: moderator_feedback || null, moderator_id: userId }
+        // Post status, any open reports on it, and the audit record change together.
+        const { updatedPost, reportsClosed } = await prisma.$transaction(async (tx) => {
+            const post = await tx.communitypost.update({
+                where: { id },
+                data: { status, moderator_feedback: moderator_feedback || null, moderator_id: userId }
+            });
+            // Approve / reject / request-revision (PENDING + feedback) all count as the moderator's review.
+            const closed = await tx.communityreport.updateMany({
+                where: { post_id: id, status: 'OPEN' },
+                data: {
+                    status: 'REVIEWED',
+                    reviewed_by: userId,
+                    reviewed_at: new Date(),
+                    moderator_note: moderator_feedback || null
+                }
+            });
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.COMMUNITY_POST_MODERATED,
+                targetResource: RESOURCES.COMMUNITY_POST,
+                targetId: id,
+                extra: { from: existing.status, to: status, feedback_provided: !!moderator_feedback, reports_closed: closed.count },
+                req
+            });
+            return { updatedPost: post, reportsClosed: closed.count };
         });
 
-        return res.status(200).json({ status: 'success', data: { ...updatedPost, media_urls: await resolveMediaUrls(updatedPost.media_urls) } });
+        return res.status(200).json({
+            status: 'success',
+            data: { ...updatedPost, media_urls: await resolveMediaUrls(updatedPost.media_urls) },
+            meta: { reports_closed: reportsClosed }
+        });
     } catch (error) { next(error); }
 };
 

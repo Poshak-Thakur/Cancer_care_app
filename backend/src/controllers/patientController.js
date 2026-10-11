@@ -1,7 +1,10 @@
 const prisma = require('../config/db');
 
 const { isUuid, normalizeLabel } = require('../utils/validators');
-const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
+const HttpError = require('../utils/httpError');
+const { parsePatientBody } = require('../utils/patientFields');
+const { lockUserSelf, lockPatientSelf } = require('../services/patientSelfLockService');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES, syncConsentRecords, revokeConsentRecords } = require('../services/auditService');
 
 const {
     canManagePatientDelegates,
@@ -11,6 +14,7 @@ const {
 } = require('../services/authorizationService');
 
 const {
+    SCOPES,
     ALL_SCOPE_NAMES,
     NON_TRANSFERABLE_SCOPES,
     DEFAULT_DELEGATE_SCOPES
@@ -25,11 +29,11 @@ const {
  */
 exports.createPatientProfile = async (req, res, next) => {
     try {
-        const {
-            full_name, date_of_birth, preferred_language = 'en', cancer_type,
-            cancer_stage, diagnosis_date, care_plan_summary,
-            relationship_type, relationship_label
-        } = req.body;
+        const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+        if (!body) return res.status(400).json({ status: 'error', message: 'Request body must be a JSON object.' });
+
+        // Relationship fields belong to this endpoint's own logic; everything else is a patient field.
+        const { relationship_type, relationship_label, ...patientBody } = body;
 
         if (relationship_type !== undefined && relationship_type !== null &&
             String(relationship_type).trim().toUpperCase() !== 'SELF') {
@@ -45,33 +49,35 @@ exports.createPatientProfile = async (req, res, next) => {
 
         const userId = req.user.userId;
 
-        if (!full_name || !date_of_birth) {
+        if (!patientBody.full_name || !patientBody.date_of_birth) {
             return res.status(400).json({ status: 'error', message: 'full_name and date_of_birth are required.' });
         }
 
-        const existingLink = await prisma.patientaccountlink.findFirst({
-            where: { user_id: userId, relationship_type: 'SELF' },
-            include: { patient: true }
-        });
+        // Same field rules as the NGO portal and PATCH /api/patients/:id (valid dates, no future dates,
+        // unknown fields rejected) so bad input is a clean 400, never a Prisma 500.
+        const parsed = parsePatientBody(patientBody, { requireAll: true });
+        if (parsed.error) return res.status(400).json({ status: 'error', message: parsed.error });
 
-        if (existingLink) {
-            return res.status(409).json({
-                status: 'error',
-                message: 'A SELF patient profile already exists for this account.',
-                data: { patient: existingLink.patient, link: existingLink }
+        const outcome = await prisma.$transaction(async (tx) => {
+            // Lock FIRST, check SECOND: two simultaneous registrations of one account are serialised here,
+            // so the second one sees the first one's SELF link.
+            await lockUserSelf(tx, userId);
+
+            const existingLink = await tx.patientaccountlink.findFirst({
+                where: { user_id: userId, relationship_type: 'SELF' },
+                include: { patient: true }
             });
-        }
+            if (existingLink) return { conflict: existingLink };
 
-        const result = await prisma.$transaction(async (tx) => {
             const newPatient = await tx.patient.create({
                 data: {
-                    full_name,
-                    date_of_birth: new Date(date_of_birth),
-                    preferred_language,
-                    cancer_type: cancer_type || null,
-                    cancer_stage: cancer_stage || null,
-                    diagnosis_date: diagnosis_date ? new Date(diagnosis_date) : null,
-                    care_plan_summary: care_plan_summary || null
+                    full_name: parsed.data.full_name,
+                    date_of_birth: parsed.data.date_of_birth,
+                    preferred_language: parsed.data.preferred_language || 'en',
+                    cancer_type: parsed.data.cancer_type || null,
+                    cancer_stage: parsed.data.cancer_stage || null,
+                    diagnosis_date: parsed.data.diagnosis_date || null,
+                    care_plan_summary: parsed.data.care_plan_summary || null
                 }
             });
 
@@ -86,13 +92,204 @@ exports.createPatientProfile = async (req, res, next) => {
                     granted_by: userId
                 }
             });
-            return { patient: newPatient, link };
+            return { created: { patient: newPatient, link } };
         });
 
-        return res.status(201).json({ status: 'success', data: result });
+        if (outcome.conflict) {
+            return res.status(409).json({
+                status: 'error',
+                message: 'A SELF patient profile already exists for this account.',
+                data: { patient: outcome.conflict.patient, link: outcome.conflict }
+            });
+        }
+        return res.status(201).json({ status: 'success', data: outcome.created });
     } catch (error) {
+        // DB backstop (uq_one_self_per_user) lost a race the lock should already have prevented.
+        if (error && error.code === 'P2002') {
+            return res.status(409).json({ status: 'error', code: 'SELF_PROFILE_EXISTS', message: 'A SELF patient profile already exists for this account.' });
+        }
         next(error);
     }
+};
+
+// ------------------------------------------------------------------
+// POST /api/patients/claim   body: { code }
+// The real patient claims an NGO-created record: the PATIENT_CLAIM code issued by the NGO
+// (POST /api/admin/patients/:id/claim-code) turns that record into the caller's SELF account.
+// Same result shape as POST /api/patients ({ patient, link }) so Flutter reuses its parsing.
+// Like createPatientProfile, SELF is created with access_scopes ['ALL'] and no consentrecord rows.
+// ------------------------------------------------------------------
+const CLAIM_INVALID_MESSAGE = 'Invalid or expired code.';          // ONE message for wrong / used / expired
+const CLAIM_MAX_FAILED_ATTEMPTS = 5;                               // per user ...
+const CLAIM_ATTEMPT_WINDOW_MS = 60 * 60 * 1000;                    // ... per hour
+const CLAIM_CODE_REGEX = /^[0-9A-F]{8}$/;
+
+const SELF_PROFILE_EXISTS_BODY = { status: 'error', code: 'SELF_PROFILE_EXISTS', message: 'A SELF patient profile already exists for this account.' };
+const SELF_LINK_EXISTS_BODY = { status: 'error', code: 'SELF_LINK_EXISTS', message: 'This patient already has an account.' };
+
+// P2002 can now come from several unique constraints. Decide which one by looking at the state AFTER the
+// failed transaction rolled back (reliable across Prisma versions / adapters), never by echoing DB details.
+const classifyClaimConflict = async (userId, patientId) => {
+    if (await prisma.patientaccountlink.findFirst({ where: { user_id: userId, relationship_type: 'SELF' }, select: { id: true } })) {
+        return 'SELF_PROFILE_EXISTS';
+    }
+    if (patientId && await prisma.patientaccountlink.findFirst({
+        where: { patient_id: patientId, relationship_type: 'SELF', consent_status: 'GRANTED', revoked_at: null }, select: { id: true }
+    })) {
+        return 'SELF_LINK_EXISTS';
+    }
+    return null;
+};
+
+exports.claimPatient = async (req, res, next) => {
+    let claimedPatientId = null;   // for conflict classification after a rolled-back transaction
+    const userId = req.user.userId;
+    try {
+        const raw = req.body?.code;
+        const code = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+
+        // ONE transaction: user lock -> count failures -> validate -> (record failure | claim).
+        // A rejected code must COMMIT its failed-attempt row, so INVALID / RATE_LIMITED are returned as
+        // results (commit), never thrown (rollback). Only real conflicts throw.
+        const outcome = await prisma.$transaction(async (tx) => {
+            await lockUserSelf(tx, userId);
+
+            const now = Date.now();
+            const windowStart = new Date(now - CLAIM_ATTEMPT_WINDOW_MS);
+
+            // Brute-force guard (DB-backed, so it survives restarts and works across instances).
+            const failures = await tx.patientclaimattempt.count({ where: { user_id: userId, attempted_at: { gte: windowStart } } });
+            if (failures >= CLAIM_MAX_FAILED_ATTEMPTS) return { type: 'RATE_LIMITED' };
+
+            const recordFailure = async () => {
+                await tx.patientclaimattempt.create({ data: { user_id: userId } });
+                await tx.patientclaimattempt.deleteMany({ where: { user_id: userId, attempted_at: { lt: windowStart } } });
+                return { type: 'INVALID' };
+            };
+
+            if (!CLAIM_CODE_REGEX.test(code)) return recordFailure();
+
+            const invite = await tx.caregiverinvite.findFirst({
+                where: { code, invite_kind: 'PATIENT_CLAIM', is_used: false, expires_at: { gt: new Date() } }
+            });
+            if (!invite) return recordFailure();
+            claimedPatientId = invite.patient_id;
+
+            // Lock order: user (above) first, patient second. Serialises with other claims and with new codes.
+            await lockPatientSelf(tx, invite.patient_id);
+
+            const activeSelf = await tx.patientaccountlink.findFirst({
+                where: { patient_id: invite.patient_id, relationship_type: 'SELF', consent_status: 'GRANTED', revoked_at: null },
+                select: { id: true }
+            });
+            if (activeSelf) throw new HttpError(409, 'This patient already has an account.', 'SELF_LINK_EXISTS');
+
+            // Same rule as createPatientProfile: one SELF patient profile per account.
+            const ownSelf = await tx.patientaccountlink.findFirst({
+                where: { user_id: userId, relationship_type: 'SELF' },
+                select: { id: true }
+            });
+            if (ownSelf) throw new HttpError(409, 'A SELF patient profile already exists for this account.', 'SELF_PROFILE_EXISTS');
+
+            // Checked BEFORE the code is consumed, so a deleted record never burns the code.
+            const patient = await tx.patient.findUnique({ where: { id: invite.patient_id } });
+            if (!patient || patient.deleted_at) return recordFailure();
+
+            // Atomic claim: of two simultaneous requests with the same code exactly one gets count 1.
+            const claimed = await tx.caregiverinvite.updateMany({
+                where: { id: invite.id, invite_kind: 'PATIENT_CLAIM', is_used: false, expires_at: { gt: new Date() } },
+                data: { is_used: true }
+            });
+            if (claimed.count !== 1) return recordFailure();
+
+            const link = await tx.patientaccountlink.create({
+                data: {
+                    user_id: userId,
+                    patient_id: invite.patient_id,
+                    relationship_type: 'SELF',
+                    relationship_label: 'Self',
+                    access_scopes: ['ALL'],          // the patient's own account, never a delegate
+                    consent_status: 'GRANTED',
+                    granted_by: userId               // the patient themselves
+                }
+            });
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.PATIENT_CLAIMED,
+                targetResource: RESOURCES.ACCOUNT_LINK,
+                targetId: link.id,
+                targetUserId: userId,
+                patientId: invite.patient_id,
+                scopesBefore: [],
+                scopesAfter: ['ALL'],
+                extra: { invite_id: invite.id, issued_by: invite.created_by || null },   // never the code
+                req
+            });
+            return { type: 'CLAIMED', data: { patient, link } };
+        });
+
+        if (outcome.type === 'RATE_LIMITED') {
+            return res.status(429).json({ status: 'error', code: 'TOO_MANY_CLAIM_ATTEMPTS', message: 'Too many failed attempts. Please try again in an hour.' });
+        }
+        if (outcome.type === 'INVALID') {
+            return res.status(400).json({ status: 'error', code: 'INVALID_CLAIM_CODE', message: CLAIM_INVALID_MESSAGE });
+        }
+        return res.status(201).json({ status: 'success', data: outcome.data });
+    } catch (error) {
+        if (error && error.code === 'P2002') {
+            const kind = await classifyClaimConflict(userId, claimedPatientId).catch(() => null);
+            if (kind === 'SELF_PROFILE_EXISTS') return res.status(409).json(SELF_PROFILE_EXISTS_BODY);
+            if (kind === 'SELF_LINK_EXISTS') return res.status(409).json(SELF_LINK_EXISTS_BODY);
+            // unrelated / unexpected unique violation: generic internal error, no DB details to the client
+        }
+        next(error);
+    }
+};
+
+// ------------------------------------------------------------------
+// PATCH /api/patients/:patient_id   (the patient's own SELF / DELEGATE account only)
+// The patient may correct their own details. care_plan_summary is deliberately NOT editable here:
+// it stays with the NGO (PATCH /api/admin/patients/:id).
+// ------------------------------------------------------------------
+const PATIENT_EDITABLE_FIELDS = ['full_name', 'date_of_birth', 'preferred_language', 'cancer_type', 'cancer_stage', 'diagnosis_date'];
+
+exports.updatePatientProfile = async (req, res, next) => {
+    try {
+        const { patient_id } = req.params;
+        const userId = req.user.userId;
+        if (!isUuid(patient_id)) return res.status(400).json({ status: 'error', message: 'Invalid patient id.' });
+
+        // role PATIENT = an active SELF / DELEGATE account link (caregivers and NGO staff resolve to other roles).
+        const ctx = await getPatientAccessContext(userId, patient_id);
+        if (!ctx || ctx.role !== 'PATIENT' || !contextHasScope(ctx, SCOPES.ACCOUNT_OPERATE)) {
+            return res.status(403).json({ status: 'error', message: 'You do not have permission to edit this patient.' });
+        }
+
+        const parsed = parsePatientBody(req.body, { requireAll: false, allowedFields: PATIENT_EDITABLE_FIELDS });
+        if (parsed.error) return res.status(400).json({ status: 'error', message: parsed.error });
+        if (Object.keys(parsed.data).length === 0) {
+            return res.status(400).json({ status: 'error', message: 'Provide at least one field to update.' });
+        }
+
+        const patient = await prisma.$transaction(async (tx) => {
+            const updated = await tx.patient.update({
+                where: { id: patient_id },
+                data: { ...parsed.data, updated_at: new Date() }
+            });
+            await recordAudit(tx, {
+                actorId: userId,
+                action: AUDIT_ACTIONS.PATIENT_UPDATED,
+                targetResource: RESOURCES.PATIENT,
+                targetId: patient_id,
+                patientId: patient_id,
+                extra: { fields: Object.keys(parsed.data), by: ctx.link.relationship_type },   // field NAMES only
+                req
+            });
+            return updated;
+        });
+
+        return res.status(200).json({ status: 'success', data: patient });
+    } catch (error) { next(error); }
 };
 
 exports.getMyPatients = async (req, res, next) => {
@@ -248,6 +445,7 @@ exports.addPatientDelegate = async (req, res, next) => {
                         granted_at: new Date()
                     }
                 });
+                await syncConsentRecords(tx, { patientId, granteeId: delegateUserId, grantedBy: grantorId, scopes: finalScopes });
                 await recordAudit(tx, {
                     actorId: grantorId,
                     action: AUDIT_ACTIONS.DELEGATE_CREATED,
@@ -281,6 +479,7 @@ exports.addPatientDelegate = async (req, res, next) => {
                     granted_by: grantorId
                 }
             });
+            await syncConsentRecords(tx, { patientId, granteeId: delegateUserId, grantedBy: grantorId, scopes: finalScopes });
             await recordAudit(tx, {
                 actorId: grantorId,
                 action: AUDIT_ACTIONS.DELEGATE_CREATED,
@@ -358,6 +557,7 @@ exports.updatePatientDelegate = async (req, res, next) => {
             const row = await tx.patientaccountlink.update({ where: { id: link.id }, data });
             // Scope changes are audited; a label-only change is not a privilege change.
             if (data.access_scopes) {
+                await syncConsentRecords(tx, { patientId, granteeId: delegateUserId, grantedBy: grantorId, scopes: data.access_scopes });
                 await recordAudit(tx, {
                     actorId: grantorId,
                     action: AUDIT_ACTIONS.DELEGATE_RESCOPED,
@@ -406,6 +606,7 @@ exports.revokePatientDelegate = async (req, res, next) => {
                 where: { id: link.id },
                 data: { consent_status: 'REVOKED', revoked_at: new Date() }
             });
+            await revokeConsentRecords(tx, { patientId, granteeId: delegateUserId });
             await recordAudit(tx, {
                 actorId,
                 action: AUDIT_ACTIONS.DELEGATE_REVOKED,

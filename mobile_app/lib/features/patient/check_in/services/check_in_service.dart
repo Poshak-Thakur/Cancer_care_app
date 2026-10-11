@@ -1,6 +1,8 @@
-import 'dart:math';
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/api_exception.dart';
+import '../../../../core/utils/uuid.dart';
+import '../models/check_in_form.dart';
 import '../models/symptom_event.dart';
 
 /// How a question is answered.
@@ -93,15 +95,8 @@ class CheckInService {
       observations.any((o) => o['severity'] is int && (o['severity'] as int) >= alertThreshold);
 
   /// Random UUID v4, sent as `client_event_id` so a retried request cannot
-  /// record the same check-in twice.
-  static String newClientEventId() {
-    final r = Random.secure();
-    final b = List<int>.generate(16, (_) => r.nextInt(256));
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    String h(int i) => b[i].toRadixString(16).padLeft(2, '0');
-    return '${h(0)}${h(1)}${h(2)}${h(3)}-${h(4)}${h(5)}-${h(6)}${h(7)}-${h(8)}${h(9)}-${h(10)}${h(11)}${h(12)}${h(13)}${h(14)}${h(15)}';
-  }
+  /// record the same check-in twice. Keep the same id when retrying the same submission.
+  static String newClientEventId() => Uuid.v4();
 
   /// POST /api/symptoms/check-in. [source]: ROUTINE (the day's first check-in)
   /// or UPDATE (an extra one later in the day).
@@ -116,6 +111,41 @@ class CheckInService {
       'observations': observations,
       'source': source,
       'client_event_id': clientEventId ?? newClientEventId(),
+    });
+  }
+
+  /// GET /api/symptoms/check-in/form: the form the NGO has PUBLISHED.
+  /// Returns null only for 404 `NO_PUBLISHED_FORM` (the caller then falls back
+  /// to the built-in questions). Every other failure is rethrown so the screen
+  /// can show an error with a retry instead of silently using outdated data.
+  Future<CheckInForm?> fetchPublishedForm() async {
+    try {
+      final res = await _api.get(ApiEndpoints.checkInForm);
+      return CheckInForm.fromJson(Map<String, dynamic>.from(res['data'] as Map));
+    } on ApiException catch (e) {
+      if (e.statusCode == 404 && e.code == 'NO_PUBLISHED_FORM') return null;
+      rethrow;
+    }
+  }
+
+  /// POST /api/symptoms/check-in with the versioned, form-based payload.
+  /// [observations] holds only the mapped established clinical fields (see
+  /// ClinicalObservationMapper); they alone feed the deterioration rule.
+  Future<void> submitForm({
+    required String patientId,
+    required String formVersionId,
+    required List<CheckInAnswerInput> answers,
+    required List<Map<String, dynamic>> observations,
+    required String clientEventId,
+    String source = 'ROUTINE',
+  }) async {
+    await _api.post(ApiEndpoints.checkIn, body: {
+      'patient_id': patientId,
+      'client_event_id': clientEventId,
+      'form_version_id': formVersionId,
+      'answers': answers.map((a) => a.toJson()).toList(),
+      'observations': observations,
+      'source': source,
     });
   }
 

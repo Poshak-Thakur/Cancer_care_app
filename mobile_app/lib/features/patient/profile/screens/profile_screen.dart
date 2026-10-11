@@ -21,6 +21,7 @@ import '../../check_in/screens/symptom_history_screen.dart';
 import '../../documents/screens/documents_screen.dart';
 import '../../messages/models/care_contact.dart';
 import '../../messages/services/chat_service.dart';
+import 'edit_patient_record_screen.dart';
 import 'invite_caregiver_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -52,6 +53,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _edit() async {
     await AppRoutes.push(context, const EditProfileScreen());
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _editRecord() async {
+    await AppRoutes.push(context, const EditPatientRecordScreen());
     if (mounted) setState(() {});
   }
 
@@ -124,6 +130,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: Icons.swap_horiz,
                   title: S.t('switchPatient'),
                   subtitle: p?.fullName,
+                  trailing: const Icon(Icons.chevron_right, color: AppColors.primary),
+                ),
+              ),
+            if (p != null && AuthState.can(AccessScope.accountOperate))
+              SaathiCard(
+                onTap: _editRecord,
+                child: InfoRow(
+                  icon: Icons.assignment_ind_outlined,
+                  title: S.t('editPatientRecord'),
+                  subtitle: p.fullName,
                   trailing: const Icon(Icons.chevron_right, color: AppColors.primary),
                 ),
               ),

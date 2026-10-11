@@ -91,8 +91,15 @@ exports.sendMessagePushNotification = async (fcmToken, { title, body, conversati
     }
 };
 
+/**
+ * Sends one critical-alert push and REPORTS THE OUTCOME instead of swallowing it:
+ *   { ok: true }                     FCM accepted the message (does NOT prove the device displayed it)
+ *   { ok: false, reason: '<CODE>' }  it could not be handed to FCM
+ * It never throws, so a caller can always record the result on the alertdelivery row.
+ */
 exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId, patientId }) => {
-    if (!fcmToken || !isInitialized) return;
+    if (!fcmToken) return { ok: false, reason: 'NO_DEVICE_TOKEN' };
+    if (!isInitialized) return { ok: false, reason: 'FIREBASE_NOT_INITIALIZED' };
     try {
         await getMessaging().send({
             token: fcmToken,
@@ -111,7 +118,11 @@ exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId
             }
         });
         console.log(`[FCM] Sent CRITICAL_ALERT notification to device.`);
+        return { ok: true };
     } catch (err) {
         console.error('[FCM] Error sending alert notification:', err.message);
+        // Only the error CODE is stored (never the message, which can echo the device token).
+        const code = String(err && err.code ? err.code : 'UNKNOWN').replace(/[^A-Za-z0-9/_.-]/g, '').slice(0, 80) || 'UNKNOWN';
+        return { ok: false, reason: `FCM_ERROR:${code}` };
     }
 };

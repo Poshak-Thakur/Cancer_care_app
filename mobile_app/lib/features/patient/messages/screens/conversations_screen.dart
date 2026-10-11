@@ -142,6 +142,17 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     );
   }
 
+  /// Unread count in a small pill ("99+" beyond 99).
+  Widget _badge(int count) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(10)),
+      child: Text(count > 99 ? '99+' : '$count', style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold)),
+    );
+  }
+
   Widget _tile(ConversationSummary c) {
     final unread = c.unreadFor(AuthState.userId);
     final name = _peerName(c);
@@ -156,6 +167,9 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name, style: TextStyle(fontWeight: unread ? FontWeight.bold : FontWeight.w600, fontSize: 15.5)),
+                if (c.patientName != null && c.patientName != name)
+                  Text('${S.t('aboutPatient')} ${c.patientName}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.textFaint)),
                 const SizedBox(height: 2),
                 Text(_preview(c),
                     maxLines: 1,
@@ -170,7 +184,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             children: [
               if (c.last != null) Text(_when(c.last!.createdAt), style: const TextStyle(fontSize: 11.5, color: AppColors.textFaint)),
               const SizedBox(height: 6),
-              if (unread) Container(width: 10, height: 10, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primary)),
+              if (unread) _badge(c.unreadBadge(AuthState.userId)),
             ],
           ),
         ],

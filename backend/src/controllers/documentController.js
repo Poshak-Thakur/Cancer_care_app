@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { isCentralCounsellor } = require('../services/authorizationService');
 const { isUuid } = require('../utils/validators');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
 const HttpError = require('../utils/httpError');
 
 const supabase = (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY))
@@ -319,14 +320,129 @@ exports.verifyDocument = async (req, res, next) => {
             return res.status(403).json({ status: 'error', message: 'Only the NGO counsellor can verify documents.' });
         }
 
-        const existing = await prisma.medicaldocument.findUnique({ where: { id }, select: { id: true } });
+        const existing = await prisma.medicaldocument.findUnique({ where: { id }, select: { id: true, patient_id: true, verification_status: true } });
         if (!existing) return res.status(404).json({ status: 'error', message: 'Document not found.' });
 
-        const updatedDoc = await prisma.medicaldocument.update({
-            where: { id },
-            data: { verification_status }
+        // Record WHO verified/rejected and WHEN (cleared again when the document goes back to PENDING),
+        // and audit every change of the verification status together with the update.
+        const updatedDoc = await prisma.$transaction(async (tx) => {
+            const updated = await tx.medicaldocument.update({
+                where: { id },
+                data: {
+                    verification_status,
+                    verified_by: verification_status === 'PENDING' ? null : userId,
+                    verified_at: verification_status === 'PENDING' ? null : new Date()
+                }
+            });
+            if (existing.verification_status !== verification_status) {
+                await recordAudit(tx, {
+                    actorId: userId,
+                    action: AUDIT_ACTIONS.DOCUMENT_VERIFICATION_CHANGED,
+                    targetResource: RESOURCES.DOCUMENT,
+                    targetId: id,
+                    patientId: existing.patient_id,
+                    extra: { from: existing.verification_status, to: verification_status },
+                    req
+                });
+            }
+            return updated;
         });
 
         return res.status(200).json({ status: 'success', data: serializeDocument(updatedDoc) });
     } catch (error) { next(error); }
 };
+
+// ------------------------------------------------------------------
+// NGO WEB: secure file access
+// Mounted under /api/admin (JWT + central NGO guard), so only the central NGO authority gets here.
+// The browser never sees the private storage path - only a short-lived signed URL.
+// ------------------------------------------------------------------
+
+const ADMIN_FILE_URL_TTL_SECONDS = 5 * 60;
+
+/**
+ * Shared flow for documents and prescriptions:
+ *   1. validate the id   2. load the record   3. check it belongs to the patient (optional ?patient_id
+ *   must match; the stored path must live under that patient's folder)   4. confirm the file exists in
+ *   the private bucket   5. sign a short-lived URL   6. audit the access   7. return ONLY url + expiry.
+ * If the audit write fails nothing is returned, so a file is never handed out unrecorded.
+ */
+const issueAdminFileUrl = async (req, res, next, { table, bucket, label, action, resource }) => {
+    try {
+        const { id } = req.params;
+        if (!isUuid(id)) return res.status(400).json({ status: 'error', message: `Invalid ${label} id.` });
+        if (req.query.patient_id !== undefined && !isUuid(req.query.patient_id)) {
+            return res.status(400).json({ status: 'error', message: 'patient_id must be a valid UUID.' });
+        }
+        if (!supabase) {
+            return res.status(503).json({ status: 'error', message: 'File storage is not configured on the server.' });
+        }
+
+        const record = await prisma[table].findUnique({
+            where: { id },
+            select: { id: true, patient_id: true, file_path: true }
+        });
+        if (!record) return res.status(404).json({ status: 'error', message: `${label[0].toUpperCase()}${label.slice(1)} not found.` });
+
+        // Association checks. A mismatch is reported as "not found" so ids cannot be probed.
+        if (req.query.patient_id && req.query.patient_id !== record.patient_id) {
+            return res.status(404).json({ status: 'error', message: `${label[0].toUpperCase()}${label.slice(1)} not found for this patient.` });
+        }
+        const filePath = typeof record.file_path === 'string' ? record.file_path : '';
+        if (!filePath || filePath.includes('..') || !filePath.startsWith(`${record.patient_id}/`)) {
+            return res.status(404).json({ status: 'error', message: 'No file is stored for this record.' });
+        }
+
+        // The file must actually exist in the private bucket.
+        const slash = filePath.lastIndexOf('/');
+        const folder = filePath.slice(0, slash);
+        const name = filePath.slice(slash + 1);
+        const { data: listing, error: listError } = await supabase.storage.from(bucket).list(folder, { search: name, limit: 100 });
+        if (listError) throw listError;
+        if (!Array.isArray(listing) || !listing.some((f) => f.name === name)) {
+            return res.status(404).json({ status: 'error', message: 'The stored file could not be found.' });
+        }
+
+        const { data, error } = await supabase.storage.from(bucket).createSignedUrl(filePath, ADMIN_FILE_URL_TTL_SECONDS);
+        if (error || !data?.signedUrl) {
+            throw new HttpError(502, 'Could not create a secure file link. Please try again.');
+        }
+
+        await recordAudit(prisma, {
+            actorId: req.user.userId,
+            action,
+            targetResource: resource,
+            targetId: record.id,
+            patientId: record.patient_id,
+            extra: { expires_in_seconds: ADMIN_FILE_URL_TTL_SECONDS },
+            req
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                url: data.signedUrl,
+                expires_in_seconds: ADMIN_FILE_URL_TTL_SECONDS,
+                expires_at: new Date(Date.now() + ADMIN_FILE_URL_TTL_SECONDS * 1000).toISOString()
+            }
+        });
+    } catch (error) { next(error); }
+};
+
+// GET /api/admin/documents/:id/file-url[?patient_id=]
+exports.getAdminDocumentFileUrl = (req, res, next) => issueAdminFileUrl(req, res, next, {
+    table: 'medicaldocument',
+    bucket: DOCUMENT_BUCKET,
+    label: 'document',
+    action: AUDIT_ACTIONS.DOCUMENT_FILE_ACCESSED,
+    resource: RESOURCES.DOCUMENT
+});
+
+// GET /api/admin/prescriptions/:id/file-url[?patient_id=]
+exports.getAdminPrescriptionFileUrl = (req, res, next) => issueAdminFileUrl(req, res, next, {
+    table: 'prescription',
+    bucket: PRESCRIPTION_BUCKET,
+    label: 'prescription',
+    action: AUDIT_ACTIONS.PRESCRIPTION_FILE_ACCESSED,
+    resource: RESOURCES.PRESCRIPTION
+});

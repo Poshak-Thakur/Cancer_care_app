@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/alerts/alert_detail_screen.dart';
 import '../../core/theme/app_colors.dart';
 import 'dashboard/screens/care_screen.dart';
 import 'messages/screens/care_team_screen.dart';
@@ -14,6 +15,13 @@ class PatientShell extends StatefulWidget {
 }
 
 class _PatientShellState extends State<PatientShell> {
+  @override
+  void initState() {
+    super.initState();
+    // A tapped critical-alert notification that arrived before the UI existed (cold start).
+    WidgetsBinding.instance.addPostFrameCallback((_) => AlertNavigator.openPendingIfAny());
+  }
+
   int _currentIndex = 0;
 
   void _goToTab(int index) => setState(() => _currentIndex = index);

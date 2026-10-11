@@ -12,6 +12,8 @@ import '../../../../core/widgets/info_row.dart';
 import '../../../../core/widgets/saathi_card.dart';
 import '../../../../core/widgets/section_label.dart';
 import '../../../auth/services/auth_state.dart';
+import '../../../shared/alerts/alert_service.dart';
+import '../../../shared/alerts/alert_widgets.dart';
 import '../../../patient/check_in/screens/check_in_screen.dart';
 import '../../../patient/check_in/screens/symptom_history_screen.dart';
 import '../../../patient/dashboard/models/dashboard_overview.dart';
@@ -45,18 +47,41 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
     super.initState();
     // The patient this caregiver is viewing, with THIS link's scopes.
     AuthState.setPatient(widget.link.patient, relationship: 'CAREGIVER', accessScopes: widget.link.accessScopes);
+    AlertEvents.changed.addListener(_onAlertsChanged);
     _load();
   }
 
+  @override
+  void dispose() {
+    AlertEvents.changed.removeListener(_onAlertsChanged);
+    super.dispose();
+  }
+
+  /// A critical-alert push arrived (or an alert changed elsewhere): reload from the backend.
+  void _onAlertsChanged() {
+    if (mounted) _load(silent: true);
+  }
+
   Future<void> _load({bool silent = false}) async {
+    final pid = widget.link.patient.id;
     if (!AuthState.can(AccessScope.dashboardView)) {
-      setState(() { _loading = false; _failed = false; }); // no DASHBOARD_VIEW: show only what the scopes allow
+      // The cached scopes may be out of date: ask the backend before limiting the screen.
+      try {
+        await AuthState.syncScopes();
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        if (AccessGuard.handle(context, e)) return;
+      }
+      if (!mounted || AuthState.patientId != pid) return;
+    }
+    if (!AuthState.can(AccessScope.dashboardView)) {
+      setState(() { _data = null; _loading = false; _failed = false; }); // no DASHBOARD_VIEW: show only what the scopes allow
       return;
     }
     if (!silent) setState(() { _loading = true; _failed = false; });
     try {
-      final d = await DashboardService().overview(widget.link.patient.id);
-      AuthState.refreshScopes(d.accessScopes); // the backend's current scopes for this link
+      final d = await DashboardService().overview(pid);
+      AuthState.refreshScopes(pid, d.accessScopes); // the backend's current scopes for this link (ignored if another patient is selected now)
       if (!mounted) return;
       setState(() { _data = d; _loading = false; _failed = false; });
     } on ApiException catch (e) {
@@ -123,6 +148,9 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
                 children: [
                   Text(widget.link.relationshipLabel, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+                  const SizedBox(height: 12),
+                  // Asking for help needs no access scope, so it is always shown.
+                  HelpNowCard(patientId: widget.link.patient.id, forPatient: true, onChanged: () => _load(silent: true)),
                   SectionLabel(S.t('myAvailability')),
                   Wrap(
                     spacing: 8,
@@ -145,11 +173,7 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
                   else if (_failed || data == null)
                     ErrorView(message: S.t('loadFailed'), onRetry: _load)
                   else ...[
-                    for (final a in data.alerts.take(2))
-                      SaathiCard(
-                        rose: true,
-                        child: InfoRow(icon: Icons.notification_important_outlined, rose: true, title: S.t('alertTitle'), subtitle: S.t('alertSub')),
-                      ),
+                    for (final a in visibleAlerts(data.alerts)) AlertCard(alert: a, onChanged: () => _load(silent: true)),
                     if (AuthState.can(AccessScope.symptomView)) ...[
                       SectionLabel(S.t('todaysCheckin')),
                       SaathiCard(

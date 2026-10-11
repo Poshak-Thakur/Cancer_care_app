@@ -50,6 +50,8 @@ class _SaathiAppState extends State<SaathiApp> with WidgetsBindingObserver {
 
   /// The server rejected our refresh token: back to the login screen.
   void _onSessionExpired() {
+    // Parallel requests can each report the expiry; handle it only once.
+    if (AuthState.userId.isEmpty) return;
     AuthState.clearLocal();
     AppRoutes.pushAndClearGlobal(const LoginScreen());
     AppRoutes.messengerKey.currentState?.showSnackBar(SnackBar(content: Text(S.t('sessionExpired'))));

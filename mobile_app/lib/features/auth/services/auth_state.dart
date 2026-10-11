@@ -1,9 +1,12 @@
 import '../../../core/authorization/access_scope.dart';
 import '../../../core/localization/lang.dart';
 import '../../../core/realtime/socket_service.dart';
+import '../../../core/storage/claim_code_storage.dart';
 import '../../shared/calls/call_coordinator.dart';
 import '../../patient/profile/models/patient.dart';
 import '../../patient/profile/models/patient_link.dart';
+import '../../patient/profile/services/patient_service.dart';
+import '../../caregiver/patients/services/caregiver_service.dart';
 import 'auth_api_service.dart';
 
 /// In-memory session for the signed-in user. Tokens live in [TokenStorage].
@@ -45,9 +48,44 @@ class AuthState {
   /// May the signed-in user do [scope] for the selected patient?
   static bool can(String scope) => AccessScope.hasScope(scopes, scope, caregiver: isCaregiver);
 
-  /// Refreshes the scopes of the selected patient (e.g. from the dashboard).
-  static void refreshScopes(List<String> latest) {
-    if (latest.isNotEmpty) scopes = latest;
+  /// Applies the scopes the backend just reported for [patientId].
+  ///
+  /// - The backend's answer replaces the old scopes completely. An empty list
+  ///   is a real answer ("no capabilities") and clears the old permissions; it
+  ///   is never ignored.
+  /// - It is dropped when another patient is selected by now: a slow response
+  ///   about patient A must never change what the user may do for patient B.
+  static void refreshScopes(String patientId, List<String> latest) {
+    if (patient?.id != patientId) return;
+    scopes = List<String>.unmodifiable(latest);
+  }
+
+  /// Asks the backend again for the selected patient's link and applies its
+  /// current scopes. Cached scopes only decide what the UI offers; the backend
+  /// still checks every request. Use this before telling someone they have no
+  /// access, because access can be granted (or taken away) while the app is open.
+  /// A link that no longer exists gives an empty list. Throws [ApiException]
+  /// on network or server errors (the old scopes are then kept).
+  static Future<void> syncScopes() async {
+    final pid = patient?.id;
+    if (pid == null) return;
+    List<String>? fresh;
+    if (isCaregiver) {
+      for (final l in await CaregiverService().myPatients()) {
+        if (l.patient.id == pid) {
+          fresh = l.accessScopes;
+          break;
+        }
+      }
+    } else {
+      for (final l in await PatientService().myPatients()) {
+        if (l.patient.id == pid) {
+          fresh = l.accessScopes;
+          break;
+        }
+      }
+    }
+    refreshScopes(pid, fresh ?? const <String>[]);
   }
 
   /// Every patient this account may operate (usually one).
@@ -145,6 +183,7 @@ class AuthState {
     patientLinks = const [];
     SocketService.instance.stop();
     CallCoordinator.onSignedOut();
+    ClaimCodeStorage.clear(); // a pending Saathi code never outlives the session
   }
 
   /// Explicit sign-out: revoke the refresh token on the server, then clear.

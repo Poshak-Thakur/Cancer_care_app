@@ -25,7 +25,13 @@ exports.getDashboardOverview = async (req, res, next) => {
 
         const role = accessContext.role;
         const link = accessContext.link;
-        const accessScopes = link?.access_scopes || ['ALL'];
+        // Explicit global access for central staff only; everyone else gets exactly the validated context scopes
+        // (missing / malformed scope data fails closed instead of being reported as 'ALL').
+        const accessScopes = role === 'STAFF'
+            ? ['ALL']
+            : Array.isArray(accessContext.scopes)
+                ? accessContext.scopes.filter((scope) => typeof scope === 'string')
+                : [];
         const relationship = link?.relationship_label || link?.relationship_type || role;
 
         // NEW: Fetch from IST midnight to IST midnight

@@ -2,17 +2,52 @@ const prisma = require('../config/db');
 const crypto = require('crypto');
 const { verifyPatientDataEventAccess } = require('../services/authorizationService');
 const { raiseOrUpdateAlert, getAlertRecipientUserIds } = require('../services/alertService');
-const { sendEmergencyAlertNotification } = require('../config/firebase');
+const { recordPushDeliveries, notifyInBackground } = require('../services/alertNotificationService');
+const { validateAnswers } = require('../services/checkInFormService');
 const { getISTDayBoundaries } = require('../utils/timezoneHelper');
 const { isUuid } = require('../utils/validators');
 
+// Configured answers come back with the field label/type they were answered under, so old
+// submissions stay readable after the NGO changes the form (additive key on the existing payload).
+const ANSWER_INCLUDE = {
+    include: {
+        field: { select: { id: true, field_key: true, label: true, field_type: true } },
+        option: { select: { id: true, option_value: true, label: true } }
+    }
+};
+
+/**
+ * POST /api/symptoms/check-in
+ *
+ * Two payload styles, both supported (the old Flutter app keeps working):
+ *   LEGACY      { patient_id, observations: [...], source?, client_event_id? }
+ *   CONFIGURED  { patient_id, client_event_id, form_version_id, answers: [{ field_id, value }], observations?: [...] }
+ *
+ * - `answers` are validated against the exact form version (field types, required fields, choice
+ *   options, numeric limits, duplicates) and stored in checkinanswer together with form_version_id.
+ *   A version that was PUBLISHED when the user filled the form is still accepted after the NGO
+ *   publishes a newer one (offline retries), but a DRAFT is never accepted.
+ * - `observations` stay the ONLY input of the deterioration-alert rule. Custom NGO-configured
+ *   questions are stored and shown, but can never silently raise, change or suppress a medical alert.
+ * - client_event_id keeps the whole submission idempotent (offline retries).
+ */
 exports.submitCheckIn = async (req, res, next) => {
     try {
-        const { patient_id, observations, source = 'ROUTINE', client_event_id } = req.body;
+        const { patient_id, source = 'ROUTINE', client_event_id, form_version_id } = req.body;
+        const answers = req.body.answers;
+        const hasAnswers = answers !== undefined && answers !== null;
+        const observations = req.body.observations === undefined || req.body.observations === null ? [] : req.body.observations;
         const userId = req.user.userId;
 
         if (!patient_id) return res.status(400).json({ status: 'error', message: 'patient_id is required.' });
-        if (!Array.isArray(observations) || observations.length === 0) return res.status(400).json({ status: 'error', message: 'At least one symptom observation is required.' });
+        if (!Array.isArray(observations)) return res.status(400).json({ status: 'error', message: 'observations must be a list.' });
+        if (hasAnswers && !Array.isArray(answers)) return res.status(400).json({ status: 'error', message: 'answers must be a list.' });
+        if (observations.length === 0 && !(hasAnswers && answers.length > 0)) {
+            return res.status(400).json({ status: 'error', message: 'At least one symptom observation is required.' });
+        }
+        if (hasAnswers && answers.length > 0 && !isUuid(form_version_id)) {
+            return res.status(400).json({ status: 'error', message: 'form_version_id (a valid UUID) is required when answers are submitted.' });
+        }
 
         for (const obs of observations) {
             if (!obs.observation_type || typeof obs.observation_type !== 'string') return res.status(400).json({ status: 'error', message: 'Each observation must include an observation_type string.' });
@@ -53,6 +88,25 @@ exports.submitCheckIn = async (req, res, next) => {
             }
         }
 
+        // Configured answers: validate against the exact form version BEFORE anything is written.
+        let answerRows = [];
+        let formVersionId = null;
+        if (hasAnswers && answers.length > 0) {
+            const version = await prisma.checkinformversion.findUnique({
+                where: { id: form_version_id },
+                include: { fields: { include: { options: true } } }
+            });
+            if (!version || version.status === 'DRAFT') {
+                return res.status(400).json({ status: 'error', code: 'UNKNOWN_FORM_VERSION', message: 'form_version_id does not match a published check-in form version.' });
+            }
+            const { errors, rows } = validateAnswers(version.fields, answers);
+            if (errors.length > 0) {
+                return res.status(400).json({ status: 'error', code: 'VALIDATION_FAILED', message: 'Some answers are not valid.', errors });
+            }
+            answerRows = rows;
+            formVersionId = version.id;
+        }
+
         // Push notification is collected inside the transaction but only SENT after it has committed,
         // so a rolled-back check-in can never trigger an emergency alert.
         let pendingAlert = null;
@@ -68,7 +122,8 @@ exports.submitCheckIn = async (req, res, next) => {
                         source: ['ROUTINE', 'UPDATE'].includes(source) ? source : 'ROUTINE',
                         client_event_id: eventUuid,
                         sync_state: 'SYNCED',
-                        recorded_at: new Date()
+                        recorded_at: new Date(),
+                        ...(formVersionId ? { form_version_id: formVersionId } : {})
                     }
                 });
 
@@ -81,7 +136,14 @@ exports.submitCheckIn = async (req, res, next) => {
                     note: obs.note || null
                 }));
 
-                await tx.symptomobservation.createMany({ data: observationData });
+                if (observationData.length > 0) {
+                    await tx.symptomobservation.createMany({ data: observationData });
+                }
+                if (answerRows.length > 0) {
+                    await tx.checkinanswer.createMany({
+                        data: answerRows.map((r) => ({ ...r, symptom_event_id: event.id }))
+                    });
+                }
 
                 // Evaluate for severe deterioration
                 const highSeverityObs = observationData.filter(o => o.severity && o.severity >= 8);
@@ -105,22 +167,11 @@ exports.submitCheckIn = async (req, res, next) => {
                         // (revoked links excluded; the person who recorded the check-in is skipped).
                         const recipientIds = await getAlertRecipientUserIds(tx, patient_id, userId);
 
-                        let tokens = [];
-                        if (recipientIds.length > 0) {
-                            // Record who was alerted (shows up in the NGO admin alert detail view).
-                            await tx.alertrecipient.createMany({
-                                data: recipientIds.map(id => ({ alert_id: outcome.alert.id, recipient_user_id: id })),
-                                skipDuplicates: true
-                            });
+                        // alertrecipient + one alertdelivery row per recipient (QUEUED, or FAILED when the
+                        // recipient has no device token). Real outcomes are recorded after the commit.
+                        const queued = await recordPushDeliveries(tx, outcome.alert.id, recipientIds);
 
-                            const recipientUsers = await tx.useraccount.findMany({
-                                where: { id: { in: recipientIds } },
-                                select: { fcm_token: true }
-                            });
-                            tokens = [...new Set(recipientUsers.map(u => u.fcm_token).filter(Boolean))];
-                        }
-
-                        pendingAlert = { alertId: outcome.alert.id, tokens };
+                        pendingAlert = { alertId: outcome.alert.id, queued };
                     }
                 }
 
@@ -138,16 +189,15 @@ exports.submitCheckIn = async (req, res, next) => {
         }
 
         if (pendingAlert) {
-            const { alertId, tokens } = pendingAlert;
-            tokens.forEach(fcmToken => {
-                // PRIVACY: no patient name, symptom or severity in the notification text.
-                // Details are only visible inside the authenticated app.
-                sendEmergencyAlertNotification(fcmToken, {
-                    title: 'Care circle alert',
-                    alertId,
-                    patientId: patient_id,
-                    body: 'Someone in your Saathi care circle may need attention.'
-                }).catch(console.error);
+            const { alertId, queued } = pendingAlert;
+            // PRIVACY: no patient name, symptom or severity in the notification text.
+            // Details are only visible inside the authenticated app. SENT / FAILED is written to
+            // alertdelivery once Firebase has answered (SENT does not prove the device displayed it).
+            notifyInBackground(queued, {
+                title: 'Care circle alert',
+                alertId,
+                patientId: patient_id,
+                body: 'Someone in your Saathi care circle may need attention.'
             });
         }
 
@@ -173,7 +223,7 @@ exports.getTodayCheckInStatus = async (req, res, next) => {
                 patient_id: patient_id,
                 recorded_at: { gte: startOfDay }
             },
-            include: { symptomobservation: true },
+            include: { symptomobservation: true, checkinanswer: ANSWER_INCLUDE },
             orderBy: { recorded_at: 'desc' }
         });
 
@@ -196,7 +246,7 @@ exports.getSymptomHistory = async (req, res, next) => {
 
         const history = await prisma.symptomevent.findMany({
             where: { patient_id },
-            include: { symptomobservation: true },
+            include: { symptomobservation: true, checkinanswer: ANSWER_INCLUDE },
             orderBy: { recorded_at: 'desc' },
             take: 30
         });

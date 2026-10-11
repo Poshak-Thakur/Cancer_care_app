@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/push/push_service.dart';
 import '../../../core/realtime/socket_service.dart';
+import '../../../core/localization/strings.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/storage/claim_code_storage.dart';
 import '../../caregiver/caregiver_shell.dart';
 import '../../shared/calls/call_coordinator.dart';
 import '../../patient/patient_shell.dart';
 import '../../patient/profile/services/patient_service.dart';
 import '../screens/caregiver_onboarding_screen.dart';
+import '../screens/claim_blocked_screen.dart';
+import '../screens/claim_code_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/patient_picker_screen.dart';
 import '../screens/profile_completion_screen.dart';
@@ -30,6 +34,10 @@ import 'auth_state.dart';
 /// with a retry.
 class SessionRouter {
   static Future<Widget> destination() async {
+    // A patient who came with a code from Saathi claims the NGO-created record first.
+    final claimScreen = await _claimIfPending();
+    if (claimScreen != null) return claimScreen;
+
     final roles = AuthState.roles;
     final isPatient = roles.contains('PATIENT');
     final isCaregiver = roles.contains('CAREGIVER');
@@ -45,6 +53,57 @@ class SessionRouter {
     // NEW_USER
     if (AuthState.role == 'caregiver') return const CaregiverOnboardingScreen();
     return _patient();
+  }
+
+  /// "I have a code from Saathi": after sign-in, claim the record.
+  ///
+  /// Returns a screen to show instead of the normal routing (refused code), or
+  /// null to carry on: no code was stored, the account already has its own
+  /// record (the stored code is dropped and that record opens), or the claim
+  /// worked (the account is a patient now and the router below opens the
+  /// claimed record: no name or date-of-birth questions).
+  ///
+  /// 400 -> code screen with the message; 409 -> "already set up", 429 -> "too
+  /// many attempts" (both final, no "create my profile"). The stored code is
+  /// removed after every final result. Network and server errors are rethrown
+  /// and the code is kept, so the caller's retry works.
+  static Future<Widget?> _claimIfPending() async {
+    final code = await ClaimCodeStorage.read();
+    if (code == null) return null;
+
+    // Always look at /patients/me first: a returning patient goes straight to
+    // their own record and never claims a second one.
+    final links = await PatientService().myPatients();
+    if (links.any((l) => l.relationshipType == 'SELF')) {
+      await ClaimCodeStorage.clear();
+      return null;
+    }
+
+    try {
+      await PatientService().claimPatient(code);
+    } on ApiException catch (e) {
+      switch (e.statusCode) {
+        case 400:
+          await ClaimCodeStorage.clear();
+          return ClaimCodeScreen(signedIn: true, message: e.message.isEmpty ? S.t('claimInvalid') : e.message);
+        case 409:
+          await ClaimCodeStorage.clear();
+          // This account already has its own record (for example a duplicate
+          // or retried claim went through): open it, do not show an error.
+          if (e.code == 'SELF_PROFILE_EXISTS') return null;
+          return ClaimBlockedScreen(message: S.t('claimAlreadySetUp'));
+        case 429:
+          await ClaimCodeStorage.clear();
+          return ClaimBlockedScreen(message: S.t('claimTooMany'));
+        default:
+          rethrow;
+      }
+    }
+    await ClaimCodeStorage.clear();
+    // The roles from sign-in said NEW_USER; the account is a patient now.
+    AuthState.roles = [...AuthState.roles.where((r) => r != 'NEW_USER' && r != 'PATIENT'), 'PATIENT'];
+    AuthState.role = 'patient';
+    return null;
   }
 
   static Future<Widget> _patient() async {

@@ -19,3 +19,13 @@ exports.normalizeLabel = (raw, fallback) => {
     }
     return { value: trimmed };
 };
+
+// Same rules as the OTP login flow (authController): trimmed, lower-cased, sane length/shape.
+// Returns the normalised email or null (also for non-strings, e.g. JSON arrays/objects).
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+exports.normalizeEmail = (value) => {
+    if (typeof value !== 'string') return null;
+    const email = value.trim().toLowerCase();
+    if (email.length > 254 || !EMAIL_REGEX.test(email)) return null;
+    return email;
+};

@@ -21,6 +21,8 @@ class ApiEndpoints {
   // patients
   static const patients = '/api/patients';
   static const myPatients = '/api/patients/me';
+  static const patientClaim = '/api/patients/claim'; // POST { code }
+  static String patient(String patientId) => '/api/patients/$patientId'; // PATCH
 
   // care events
   static const careEvents = '/api/care-events';
@@ -36,8 +38,13 @@ class ApiEndpoints {
 
   // symptoms / check-in
   static const checkIn = '/api/symptoms/check-in';
+  static const checkInForm = '/api/symptoms/check-in/form'; // published NGO-controlled form
   static String todayCheckIn(String patientId) => '/api/symptoms/today/$patientId';
   static String symptomHistory(String patientId) => '/api/symptoms/history/$patientId';
+
+  // alerts (manual Help Now)
+  static const helpNow = '/api/alerts/help-now';
+  static String cancelHelpNow(String alertId) => '/api/alerts/$alertId/cancel'; // PATCH
 
   // dashboard
   static String dashboard(String patientId) => '/api/dashboard/$patientId';

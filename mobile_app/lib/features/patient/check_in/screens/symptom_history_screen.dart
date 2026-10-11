@@ -10,7 +10,9 @@ import '../../../../core/widgets/saathi_card.dart';
 import '../models/symptom_event.dart';
 import '../services/check_in_service.dart';
 
-/// The last 30 check-ins with each symptom's severity (GET /api/symptoms/history).
+/// The last 30 check-ins (GET /api/symptoms/history): each symptom's severity
+/// from `symptomobservation`, plus the configurable answers from `checkinanswer`
+/// with the label of the form version they were answered under.
 class SymptomHistoryScreen extends StatefulWidget {
   final String patientId;
   const SymptomHistoryScreen({super.key, required this.patientId});
@@ -161,8 +163,35 @@ class _SymptomHistoryScreenState extends State<SymptomHistoryScreen> {
                 ],
               ),
             ),
+          for (final a in e.answers) _answerRow(a),
         ],
       ),
+    );
+  }
+
+  /// A configurable answer, shown under the label it had when it was answered.
+  Widget _answerRow(CheckInAnswerRecord a) {
+    final value = a.displayValue(yes: S.t('yesLabel'), no: S.t('noLabel')).trim();
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: a.isLongText && value.length > 24
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(a.label, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.35)),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 5, child: Text(a.label, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary))),
+                const SizedBox(width: 10),
+                Expanded(flex: 4, child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600))),
+              ],
+            ),
     );
   }
 }

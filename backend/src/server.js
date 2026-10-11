@@ -4,17 +4,18 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const app = require('./app');
 const { initChatCleanupJob } = require('./jobs/chatCleanup');
+const { getAllowedOrigins } = require('./config/cors');
 
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
-const io = new Server(server, { 
-    cors: { 
-        origin: process.env.NODE_ENV === 'production' 
-            ? (process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['https://ngo.saathi.org']) 
-            : '*',
+// Socket.io uses the SAME explicit allowlist as the REST API (CORS_ALLOWED_ORIGINS, see config/cors.js).
+// No separate variable and no '*' fallback. Native apps send no Origin header and are unaffected.
+const io = new Server(server, {
+    cors: {
+        origin: getAllowedOrigins(),
         methods: ['GET', 'POST']
-    } 
+    }
 });
 app.set('io', io);
 

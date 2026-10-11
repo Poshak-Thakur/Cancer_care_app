@@ -37,23 +37,48 @@ const hasCentralRole = (roles) =>
     Array.isArray(roles) &&
     roles.some((r) => typeof r === 'string' && CENTRAL_ROLES.includes(r.trim().toUpperCase()));
 
+/**
+ * SINGLE CENTRAL NGO AUTHORITY
+ * ------------------------------------------------------------------
+ * Exactly ONE account is the central NGO head/counsellor. Creating another staffprofile with a
+ * COUNSELLOR / ADMIN role does NOT make that account a second authority.
+ *
+ *   1. If the ngoauthority singleton row exists, that account is the authority - but only while it
+ *      still has an active staffprofile with a central role (otherwise nobody is: fail closed).
+ *   2. Without that row (before the migration seeds it) the OLDEST active central staffprofile is
+ *      the authority, deterministically, and a warning is logged if there are several candidates.
+ *
+ * Every access decision (admin API, patient access, alert recipients, calls) goes through here.
+ */
+const resolveCentralAuthorityUserId = async () => {
+    const [anchor, profiles] = await Promise.all([
+        prisma.ngoauthority.findUnique({ where: { key: 'CENTRAL' } }),
+        prisma.staffprofile.findMany({ where: { is_active: true }, select: { user_id: true, roles: true, created_at: true } })
+    ]);
+    const central = profiles.filter((p) => hasCentralRole(p.roles));
+    if (anchor) {
+        const stillQualifies = central.some((p) => p.user_id === anchor.user_id);
+        if (!stillQualifies) console.error('[authz] The registered NGO authority has no active central staff profile; no account has central access.');
+        return stillQualifies ? anchor.user_id : null;
+    }
+    if (central.length === 0) return null;
+    if (central.length > 1) {
+        console.warn(`[authz] ${central.length} active central staff profiles found but no ngoauthority row; only the oldest keeps central access. Seed ngoauthority to make this explicit.`);
+    }
+    central.sort((a, b) => (new Date(a.created_at) - new Date(b.created_at)) || String(a.user_id).localeCompare(String(b.user_id)));
+    return central[0].user_id;
+};
+
 // True if this user is the single central NGO head / counsellor.
 const isCentralCounsellor = async (userId) => {
     if (!isUuid(userId)) return false;
-    const profile = await prisma.staffprofile.findFirst({
-        where: { user_id: userId, is_active: true },
-        select: { roles: true }
-    });
-    return !!profile && hasCentralRole(profile.roles);
+    return (await resolveCentralAuthorityUserId()) === userId;
 };
 
-// User ids of every active central NGO account (normally exactly one).
+// User ids of the central NGO authority (at most one).
 const getCentralCounsellorUserIds = async () => {
-    const profiles = await prisma.staffprofile.findMany({
-        where: { is_active: true },
-        select: { user_id: true, roles: true }
-    });
-    return profiles.filter((p) => hasCentralRole(p.roles)).map((p) => p.user_id);
+    const id = await resolveCentralAuthorityUserId();
+    return id ? [id] : [];
 };
 
 // "Active" = consent granted AND never revoked (defence in depth: both must agree).

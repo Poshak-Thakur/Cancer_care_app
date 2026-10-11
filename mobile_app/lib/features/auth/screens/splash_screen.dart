@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/localization/lang.dart';
@@ -14,14 +15,20 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _fade;
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _fade = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..forward();
+
+    _fade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..forward();
+
     _timer = Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
       AppRoutes.fadeReplace(context, const SessionGateScreen());
@@ -47,11 +54,26 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             builder: (context, _, __) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const DragonflyMark(size: 72, color: AppColors.bg),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.bg,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const DragonflyMark(size: 72),
+                ),
                 const SizedBox(height: 16),
                 const Text(
                   'Saathi',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.bg, letterSpacing: 0.2),
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.bg,
+                    letterSpacing: 0.2,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Padding(
@@ -59,7 +81,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   child: Text(
                     S.t('tagline'),
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, color: AppColors.primaryLight.withOpacity(0.9)),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.primaryLight.withOpacity(0.9),
+                    ),
                   ),
                 ),
               ],

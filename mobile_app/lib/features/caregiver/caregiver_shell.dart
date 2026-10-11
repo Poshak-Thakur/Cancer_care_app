@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/alerts/alert_detail_screen.dart';
 import '../../core/theme/app_colors.dart';
 import '../patient/community/screens/community_screen.dart';
 import '../patient/messages/screens/conversations_screen.dart';
@@ -15,6 +16,13 @@ class CaregiverShell extends StatefulWidget {
 }
 
 class _CaregiverShellState extends State<CaregiverShell> {
+  @override
+  void initState() {
+    super.initState();
+    // A tapped critical-alert notification that arrived before the UI existed (cold start).
+    WidgetsBinding.instance.addPostFrameCallback((_) => AlertNavigator.openPendingIfAny());
+  }
+
   int _index = 0;
   int _patientsVersion = 0; // bumped after linking so the patient list reloads from the backend
 

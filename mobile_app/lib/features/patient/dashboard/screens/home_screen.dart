@@ -15,9 +15,10 @@ import '../../../../core/authorization/access_guard.dart';
 import '../../../../core/authorization/access_scope.dart';
 import '../../../auth/screens/patient_picker_screen.dart';
 import '../../../auth/services/auth_state.dart';
+import '../../../shared/alerts/alert_service.dart';
+import '../../../shared/alerts/alert_widgets.dart';
 import '../../check_in/screens/check_in_screen.dart';
 import '../../messages/services/chat_service.dart';
-import '../../../../core/utils/ist.dart';
 import '../models/dashboard_overview.dart';
 import '../services/dashboard_service.dart';
 import '../widgets/care_event_labels.dart';
@@ -41,7 +42,19 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    AlertEvents.changed.addListener(_onAlertsChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    AlertEvents.changed.removeListener(_onAlertsChanged);
+    super.dispose();
+  }
+
+  /// A critical-alert push arrived (or an alert was cancelled elsewhere): reload from the backend.
+  void _onAlertsChanged() {
+    if (mounted) _load(silent: true);
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -54,8 +67,20 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (!AuthState.can(AccessScope.dashboardView)) {
+      // The cached scopes may be out of date (access can be granted later):
+      // ask the backend before showing "no access".
+      try {
+        await AuthState.syncScopes();
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        if (AccessGuard.handle(context, e)) return;
+      }
+      if (!mounted || AuthState.patientId != pid) return;
+    }
+    if (!AuthState.can(AccessScope.dashboardView)) {
       setState(() {
         _noAccess = true;
+        _data = null;
         _loading = false;
         _failed = false;
       });
@@ -70,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final data = await DashboardService().overview(pid);
-      AuthState.refreshScopes(data.accessScopes); // picks up scope changes made by the NGO/patient
+      AuthState.refreshScopes(pid, data.accessScopes); // picks up scope changes made by the NGO/patient (ignored if another patient is selected now)
       _loadUnread();
       if (!mounted) return;
       setState(() {
@@ -156,6 +181,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _limitedAccess() => [
         if (AuthState.isManagingOther || AuthState.patientLinks.length > 1)
           SaathiCard(child: InfoRow(icon: Icons.supervisor_account_outlined, title: '${S.t('actingAs')} ${AuthState.patient?.fullName ?? ''}')),
+        // Asking for help needs no access scope, so it stays available here.
+        if (AuthState.patientId != null) HelpNowCard(patientId: AuthState.patientId!, onChanged: () => _load(silent: true)),
+        const SizedBox(height: 10),
         SaathiCard(
           child: InfoRow(icon: Icons.lock_outline, title: S.t('limitedAccess'), subtitle: S.t('limitedAccessSub')),
         ),
@@ -180,16 +208,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 : null,
           ),
         ),
-      for (final a in data.alerts.take(2))
-        SaathiCard(
-          rose: true,
-          child: InfoRow(
-            icon: Icons.notification_important_outlined,
-            rose: true,
-            title: S.t('alertTitle'),
-            subtitle: '${S.t('alertSub')} · ${Ist.clock(a.createdAt)}',
-          ),
-        ),
+      if (AuthState.patientId != null) HelpNowCard(patientId: AuthState.patientId!, onChanged: () => _load(silent: true)),
+      const SizedBox(height: 10),
+      // Type-aware cards: Help Now, severe symptom, missed medicine, missed follow-up.
+      for (final a in visibleAlerts(data.alerts)) AlertCard(alert: a, onChanged: () => _load(silent: true)),
       if (AuthState.can(AccessScope.symptomWrite))
       SaathiCard(
         onTap: _openCheckIn,

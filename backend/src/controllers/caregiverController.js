@@ -5,7 +5,7 @@ const {
     canManagePatientCaregivers,
     ACTIVE_LINK
 } = require('../services/authorizationService');
-const { recordAudit, AUDIT_ACTIONS, RESOURCES } = require('../services/auditService');
+const { recordAudit, AUDIT_ACTIONS, RESOURCES, syncConsentRecords, revokeConsentRecords } = require('../services/auditService');
 const { isUuid, normalizeLabel } = require('../utils/validators');
 const { DEFAULT_CAREGIVER_SCOPES } = require('../constants/accessScopes');
 const HttpError = require('../utils/httpError');
@@ -154,7 +154,7 @@ exports.generateInvite = async (req, res, next) => {
             const candidate = crypto.randomBytes(4).toString('hex').toUpperCase();
             try {
                 await prisma.caregiverinvite.create({
-                    data: { patient_id: patientId, code: candidate, expires_at: expiresAt }
+                    data: { patient_id: patientId, code: candidate, expires_at: expiresAt, created_by: userId }
                 });
                 code = candidate;
             } catch (err) {
@@ -222,13 +222,14 @@ exports.acceptInvite = async (req, res, next) => {
             }
 
             const invite = await tx.caregiverinvite.findUnique({ where: { code: inviteCode } });
-            if (!invite || invite.is_used || invite.expires_at < new Date()) {
+            // Only CAREGIVER codes: a PATIENT_CLAIM code must never create a caregiver link.
+            if (!invite || invite.invite_kind !== 'CAREGIVER' || invite.is_used || invite.expires_at < new Date()) {
                 throw new HttpError(400, 'Invalid or expired invite code.');
             }
 
             // Atomic claim: only one concurrent request can flip is_used false -> true.
             const claimed = await tx.caregiverinvite.updateMany({
-                where: { id: invite.id, is_used: false, expires_at: { gt: new Date() } },
+                where: { id: invite.id, invite_kind: 'CAREGIVER', is_used: false, expires_at: { gt: new Date() } },
                 data: { is_used: true }
             });
             if (claimed.count !== 1) {
@@ -268,6 +269,26 @@ exports.acceptInvite = async (req, res, next) => {
                 include: { patient: true }
             });
 
+            // Consent history, attributed to whoever generated the invite (the actual grantor) -
+            // NOT to the caregiver who accepts it. Legacy invites without a creator fall back to
+            // the patient's own account holder. An already-active link keeps its existing history.
+            let consent = { granted: [], revoked: [], recorded: false };
+            if (!isActive) {
+                let grantorId = invite.created_by || null;
+                if (!grantorId) {
+                    const selfLink = await tx.patientaccountlink.findFirst({
+                        where: { patient_id: invite.patient_id, relationship_type: 'SELF', consent_status: 'GRANTED', revoked_at: null }
+                    });
+                    grantorId = selfLink ? selfLink.user_id : null;
+                }
+                if (grantorId) {
+                    const synced = await syncConsentRecords(tx, {
+                        patientId: invite.patient_id, granteeId: userId, grantedBy: grantorId, scopes: newScopes
+                    });
+                    consent = { ...synced, recorded: true, granted_by: grantorId };
+                }
+            }
+
             await recordAudit(tx, {
                 actorId: userId,
                 action: AUDIT_ACTIONS.CAREGIVER_LINK_CREATED,
@@ -277,7 +298,7 @@ exports.acceptInvite = async (req, res, next) => {
                 patientId: invite.patient_id,
                 scopesBefore: existing ? (Array.isArray(existing.access_scopes) ? existing.access_scopes : []) : [],
                 scopesAfter: isActive ? existing.access_scopes : newScopes,
-                extra: { invite_id: invite.id, relinked: !!existing && !isActive, already_active: isActive },
+                extra: { invite_id: invite.id, invited_by: invite.created_by || null, relinked: !!existing && !isActive, already_active: isActive, consent_recorded: consent.recorded },
                 req
             });
 
@@ -317,6 +338,10 @@ exports.revokeCaregiver = async (req, res, next) => {
                 where: { patient_id_caregiver_user_id: { patient_id, caregiver_user_id } },
                 data: { consent_status: 'REVOKED', revoked_at: new Date() }
             });
+
+            // History is preserved: the active consent rows are marked REVOKED, not deleted.
+            // (Removing NGO recognition does NOT do this - only revoking the link does.)
+            await revokeConsentRecords(tx, { patientId: patient_id, granteeId: caregiver_user_id });
 
             await recordAudit(tx, {
                 actorId: userId,

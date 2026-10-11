@@ -1,0 +1,23 @@
+// TEST FIXTURES for the integration rig only (never shipped with the portal).
+const crypto=require('crypto');
+module.exports=async function seed(h){const db=h.fakeDb,now=Date.now(),H=36e5;
+  const ngo=await h.addNgo();await db.useraccount.update({where:{id:ngo.id},data:{email:'counsellor@saathi.test',full_name:'Asha Rao'}});
+  await db.ngoauthority.create({data:{key:'CENTRAL',user_id:ngo.id}});
+  const a=await h.addPatientWithOwner('Meera Kulkarni'),b=await h.addPatientWithOwner('Ramesh Patil'),c=await h.addPatientWithOwner('Meera Kulkarni');
+  for(const [x,n] of [[a,'meera.owner'],[b,'ramesh.owner'],[c,'meera2.owner']])await db.useraccount.update({where:{id:x.owner.id},data:{email:n+'@test.dev'}});
+  await db.patient.update({where:{id:a.patient.id},data:{cancer_type:'Breast',cancer_stage:'II',preferred_language:'mr'}});
+  await db.patient.update({where:{id:c.patient.id},data:{date_of_birth:new Date('1980-01-01')}});
+  const cg=await h.addCaregiver('kavya',{type:'FAMILY'}),vol=await h.addCaregiver('rohit',{type:'VOLUNTEER'});
+  await h.linkCaregiver(a.patient.id,cg.user.id);
+  const mk=(o)=>db.alert.create({data:{patient_id:a.patient.id,severity:'HIGH',status:'OPEN',...o}});
+  const help=await mk({type:'HELP_REQUEST',requested_by_user_id:a.owner.id,client_event_id:crypto.randomUUID()});
+  const auto=await mk({type:'DETERIORATION',severity:'MEDIUM'});
+  await db.medicaldocument.create({data:{patient_id:a.patient.id,title:'Blood test',document_type:'LAB_REPORT',file_path:`${a.patient.id}/x.pdf`,mime_type:'application/pdf',file_size_bytes:10,is_private:true,uploaded_by:a.owner.id,uploaded_at:new Date(now-48*H)}});
+  h.storage.files.add(`medical_documents::${a.patient.id}/x.pdf`);
+  const med=await db.patientmedication.create({data:{patient_id:a.patient.id,name:'Tamoxifen',strength:'20 mg',kind:'SCHEDULED'}}).catch(()=>null);
+  await db.careevent.create({data:{patient_id:a.patient.id,type:'APPOINTMENT',schedule_time:new Date(now-3*H),completion_status:'SCHEDULED'}}).catch(e=>console.log('careevent seed',e.message));
+  const ev=await db.symptomevent.create({data:{patient_id:a.patient.id,recorded_at:new Date(now-20*H),source:'PATIENT',client_event_id:crypto.randomUUID()}}).catch(e=>console.log('sym seed',e.message));
+  if(ev)await db.symptomobservation.create({data:{symptom_event_id:ev.id,observation_type:'PAIN',severity:7}}).catch(()=>{});
+  const post=await db.communitypost.create({data:{author_id:b.owner.id,post_type:'TEXT',content:'Walking helps my energy.',status:'PENDING',visibility:'PUBLIC'}}).catch(e=>console.log('post seed',e.message));
+  if(post)await db.communityreport.create({data:{post_id:post.id,reporter_id:cg.user.id,reason:'Check the health claim',status:'OPEN'}}).catch(e=>console.log('rep',e.message));
+  return{ngo,a,b,c,cg,vol,help,auto};};

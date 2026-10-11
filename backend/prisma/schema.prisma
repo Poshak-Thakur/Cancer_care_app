@@ -19,13 +19,18 @@ model alert {
   rule_id             String?           @db.VarChar(100)
   rule_version        String?           @db.VarChar(50)
   rule_cooldown_until DateTime?         @db.Timestamptz(6)
+  // Manual Help Now only: the user who pressed the button (null for automatic alerts).
+  // Only this user may cancel their Help Now alert.
+  requested_by_user_id String?          @db.Uuid
   created_at          DateTime          @default(now()) @db.Timestamptz(6)
   updated_at          DateTime          @default(now()) @db.Timestamptz(6)
-  patient             patient           @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patient             patient           @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  requested_by        useraccount?      @relation("alert_requested_by", fields: [requested_by_user_id], references: [id], onUpdate: NoAction)
   alertrecipient      alertrecipient[]
   alertupdate         alertupdate[]
 
   @@index([patient_id, status], map: "idx_alert_patient_status")
+  @@index([requested_by_user_id], map: "idx_alert_requested_by")
 }
 
 model alertdelivery {
@@ -66,6 +71,8 @@ model alertupdate {
   created_by  String      @db.Uuid
   type        String      @db.VarChar(50)
   note        String?
+  // Idempotency key of a repeated manual Help Now press that was merged into an open alert.
+  client_event_id String? @unique @db.Uuid
   created_at  DateTime    @default(now()) @db.Timestamptz(6)
   alert       alert       @relation(fields: [alert_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   useraccount useraccount @relation(fields: [created_by], references: [id], onUpdate: NoAction)
@@ -110,8 +117,8 @@ model careevent {
   created_at            DateTime               @default(now()) @db.Timestamptz(6)
   updated_at            DateTime               @default(now()) @db.Timestamptz(6)
   useraccount           useraccount?           @relation(fields: [assignee_user_id], references: [id], onUpdate: NoAction)
-  patient               patient                @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  patientmedication     patientmedication?     @relation(fields: [patient_medication_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patient               patient                @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  patientmedication     patientmedication?     @relation(fields: [patient_medication_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([patient_id, schedule_time, completion_status], map: "idx_care_event_schedule")
 }
@@ -133,12 +140,31 @@ model caregiverinvite {
   id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   patient_id String   @db.Uuid
   code       String   @unique @db.VarChar(10)
+  // CAREGIVER = invite a caregiver to the care circle (existing behaviour; every old row keeps this value).
+  // PATIENT_CLAIM = one-time code that lets the real patient claim an NGO-created record as their SELF account.
+  // acceptInvite only honours CAREGIVER codes.
+  invite_kind invite_kind_enum @default(CAREGIVER)
   is_used    Boolean  @default(false)
   expires_at DateTime @db.Timestamptz(6)
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  // Who generated the invite = the grantor recorded on the resulting consent. Null only for
+  // invites created before this field existed.
+  created_by String?  @db.Uuid
   patient    patient  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  creator    useraccount? @relation("caregiverinvite_creator", fields: [created_by], references: [id], onUpdate: NoAction)
 
   @@index([code, is_used])
+  @@index([patient_id, invite_kind, is_used], map: "idx_invite_patient_kind")
+}
+
+// Failed patient-claim attempts (wrong / used / expired code) - drives the 5 per user per hour limit.
+model patientclaimattempt {
+  id           String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id      String      @db.Uuid
+  attempted_at DateTime    @default(now()) @db.Timestamptz(6)
+  useraccount  useraccount @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, attempted_at], map: "idx_claim_attempt_user_time")
 }
 
 model consentrecord {
@@ -152,9 +178,11 @@ model consentrecord {
   revoked_at                                        DateTime?           @db.Timestamptz(6)
   useraccount_consentrecord_granted_byTouseraccount useraccount         @relation("consentrecord_granted_byTouseraccount", fields: [granted_by], references: [id], onUpdate: NoAction)
   useraccount_consentrecord_grantee_idTouseraccount useraccount         @relation("consentrecord_grantee_idTouseraccount", fields: [grantee_id], references: [id], onUpdate: NoAction)
-  patient                                           patient             @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patient                                           patient             @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([patient_id, grantee_id, data_scope, status], map: "idx_consent_active")
+  // At most ONE active grant per (patient, grantee, scope). Revoked rows are kept for history.
+  @@unique([patient_id, grantee_id, data_scope], map: "uq_consent_one_active_grant", where: raw("((status = 'GRANTED'::consent_status_enum) AND (revoked_at IS NULL))"))
 }
 
 model patient {
@@ -168,6 +196,9 @@ model patient {
   care_plan_summary    String?
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  // Soft delete: patient history (alerts, symptoms, prescriptions, documents, care events,
+  // case notes, consent) is retained; hard deletes are blocked by Restrict foreign keys.
+  deleted_at           DateTime?              @db.Timestamptz(6)
   alert                alert[]
   callsession          callsession[]
   careevent            careevent[]
@@ -177,6 +208,7 @@ model patient {
   medicaldocument      medicaldocument[]
   patientaccountlink   patientaccountlink[]
   patientcaregiverlink patientcaregiverlink[]
+  patientcasenote      patientcasenote[]
   patientmedication    patientmedication[]
   prescription         prescription[]
   staffassignment      staffassignment[]
@@ -198,7 +230,12 @@ model patientaccountlink {
   patient                                                patient             @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   useraccount_patientaccountlink_user_idTouseraccount    useraccount         @relation("patientaccountlink_user_idTouseraccount", fields: [user_id], references: [id], onUpdate: NoAction)
 
+  // v1 decision: one row per user/patient pair. A returning delegate REACTIVATES this row; every
+  // grant, revocation and scope change is preserved in consentrecord + auditlogentry.
   @@unique([user_id, patient_id], map: "uq_user_patient_link")
+  // DB backstop: at most ONE active SELF account per patient. "Active" is exactly what the backend's
+  // ACTIVE_LINK means: consent_status = GRANTED AND revoked_at IS NULL. Revoked history rows are unaffected.
+  @@unique([patient_id], map: "uq_one_active_self_per_patient", where: raw("((relationship_type = 'SELF'::account_link_type) AND (consent_status = 'GRANTED'::consent_status_enum) AND (revoked_at IS NULL))"))
   @@index([user_id, patient_id], map: "idx_account_link_lookup")
   @@index([patient_id, consent_status], map: "idx_account_link_patient_consent")
   @@index([user_id, consent_status], map: "idx_account_link_user_consent")
@@ -218,8 +255,25 @@ model patientcaregiverlink {
   useraccount        useraccount                 @relation(fields: [caregiver_user_id], references: [id], onUpdate: NoAction)
   patient            patient                     @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  // v1 decision: one row per patient/caregiver pair (reactivated on re-link); history lives in
+  // consentrecord + auditlogentry. Do NOT drop this unique without a replacement rule.
   @@unique([patient_id, caregiver_user_id], map: "uq_patient_caregiver")
   @@index([patient_id, caregiver_user_id], map: "idx_caregiver_patient")
+  // "My patients" / login role check look links up by caregiver alone (authController, caregiverController, callController).
+  @@index([caregiver_user_id, consent_status], map: "idx_caregiver_link_user_consent")
+}
+
+// Append-only NGO case notes about a patient (no update / delete in v1).
+model patientcasenote {
+  id         String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  patient_id String      @db.Uuid
+  author_id  String      @db.Uuid
+  note       String
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  patient    patient     @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  author     useraccount @relation("casenote_author", fields: [author_id], references: [id], onUpdate: NoAction)
+
+  @@index([patient_id, created_at], map: "idx_case_note_patient")
 }
 
 model patientmedication {
@@ -238,7 +292,7 @@ model patientmedication {
   created_at                                             DateTime                 @default(now()) @db.Timestamptz(6)
   careevent                                              careevent[]
   useraccount_patientmedication_entered_byTouseraccount  useraccount              @relation("patientmedication_entered_byTouseraccount", fields: [entered_by], references: [id], onUpdate: NoAction)
-  patient                                                patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patient                                                patient                  @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   prescription                                           prescription?            @relation(fields: [source_prescription_id], references: [id], onUpdate: NoAction)
   useraccount_patientmedication_verified_byTouseraccount useraccount?             @relation("patientmedication_verified_byTouseraccount", fields: [verified_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
@@ -254,7 +308,7 @@ model prescription {
   uploaded_by            String                   @db.Uuid
   uploaded_at            DateTime                 @default(now()) @db.Timestamptz(6)
   patientmedication      patientmedication[]
-  patient                patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  patient                patient                  @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   useraccount            useraccount              @relation(fields: [uploaded_by], references: [id], onUpdate: NoAction)
   prescriptionextraction prescriptionextraction[]
 }
@@ -314,11 +368,16 @@ model symptomevent {
   client_event_id    String               @unique @db.Uuid
   sync_state         String               @default("SYNCED") @db.VarChar(50)
   recorded_at        DateTime             @default(now()) @db.Timestamptz(6)
-  patient            patient              @relation(fields: [patient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // Form version used for this submission. Nullable so existing rows stay valid.
+  form_version_id    String?              @db.Uuid
+  patient            patient              @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   useraccount        useraccount          @relation(fields: [recorded_by], references: [id], onUpdate: NoAction)
   symptomobservation symptomobservation[]
+  form_version       checkinformversion?  @relation(fields: [form_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  checkinanswer      checkinanswer[]
 
   @@index([patient_id, recorded_at(sort: Desc)], map: "idx_symptom_event_patient")
+  @@index([form_version_id], map: "idx_symptom_event_form_version")
 }
 
 model symptomobservation {
@@ -332,6 +391,8 @@ model symptomobservation {
   symptomevent     symptomevent @relation(fields: [symptom_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([symptom_event_id], map: "idx_symptom_obs_parent")
+  // Intentionally NO unique on (symptom_event_id, observation_type): repeated observations stay valid.
+  // Add it only if the product guarantees one observation per type per submission.
 }
 
 model useraccount {
@@ -351,6 +412,11 @@ model useraccount {
   alertrecipient_alertrecipient_recipient_user_idTouseraccount  alertrecipient[]       @relation("alertrecipient_recipient_user_idTouseraccount")
   alertrecipient_alertrecipient_resolver_idTouseraccount        alertrecipient[]       @relation("alertrecipient_resolver_idTouseraccount")
   alertupdate                                                   alertupdate[]
+  alert_requested                                               alert[]                @relation("alert_requested_by")
+  caregiverinvite_created                                       caregiverinvite[]      @relation("caregiverinvite_creator")
+  patientcasenote_authored                                      patientcasenote[]      @relation("casenote_author")
+  communityreport_reported                                      communityreport[]      @relation("report_reporter")
+  communityreport_reviewed                                      communityreport[]      @relation("report_reviewer")
   auditlogentry                                                 auditlogentry[]
   callsession_caller                                            callsession[]          @relation("call_caller")
   callsession_receiver                                          callsession[]          @relation("call_receiver")
@@ -365,6 +431,12 @@ model useraccount {
   consentrecord_consentrecord_granted_byTouseraccount           consentrecord[]        @relation("consentrecord_granted_byTouseraccount")
   consentrecord_consentrecord_grantee_idTouseraccount           consentrecord[]        @relation("consentrecord_grantee_idTouseraccount")
   medicaldocument_uploader                                      medicaldocument[]      @relation("doc_uploader")
+  medicaldocument_verified                                      medicaldocument[]      @relation("doc_verifier")
+  checkinform_created                                           checkinform[]          @relation("checkinform_creator")
+  checkinformversion_created                                    checkinformversion[]   @relation("checkinformversion_creator")
+  checkinformversion_published                                  checkinformversion[]   @relation("checkinformversion_publisher")
+  ngoauthority                                                  ngoauthority?
+  patientclaimattempt                                           patientclaimattempt[]
   patientaccountlink_patientaccountlink_granted_byTouseraccount patientaccountlink[]   @relation("patientaccountlink_granted_byTouseraccount")
   patientaccountlink_patientaccountlink_user_idTouseraccount    patientaccountlink[]   @relation("patientaccountlink_user_idTouseraccount")
   patientcaregiverlink                                          patientcaregiverlink[]
@@ -402,8 +474,31 @@ model communitypost {
   postcomment        postcomment[]
   polloption         polloption[]
   pollvote           pollvote[]
+  communityreport    communityreport[]
 
   @@index([status, visibility], map: "idx_post_moderation")
+}
+
+// A user's report of a community post. History is kept (reports are never deleted); a user may
+// have only ONE open report per post (partial unique index).
+model communityreport {
+  id             String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  post_id        String                       @db.Uuid
+  reporter_id    String                       @db.Uuid
+  reason         String                       @db.VarChar(1000)
+  status         community_report_status_enum @default(OPEN)
+  created_at     DateTime                     @default(now()) @db.Timestamptz(6)
+  reviewed_by    String?                      @db.Uuid
+  reviewed_at    DateTime?                    @db.Timestamptz(6)
+  moderator_note String?
+
+  post           communitypost                @relation(fields: [post_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reporter       useraccount                  @relation("report_reporter", fields: [reporter_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reviewer       useraccount?                 @relation("report_reviewer", fields: [reviewed_by], references: [id], onUpdate: NoAction)
+
+  @@unique([post_id, reporter_id], map: "uq_open_report_per_user_post", where: raw("(status = 'OPEN'::community_report_status_enum)"))
+  @@index([status, created_at], map: "idx_report_status")
+  @@index([post_id], map: "idx_report_post")
 }
 
 model postlike {
@@ -457,11 +552,13 @@ model pollvote {
 model chatconversation {
   id                 String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   patient_id         String?       @db.Uuid
-  participant_one_id String?       @db.Uuid
-  participant_two_id String?       @db.Uuid
+  // Both participants are required. The backend MUST store them in a consistent order
+  // (participant_one_id < participant_two_id); the migration adds a CHECK for this.
+  participant_one_id String       @db.Uuid
+  participant_two_id String       @db.Uuid
   created_at         DateTime      @default(now()) @db.Timestamptz(6)
-  participant_one    useraccount?  @relation("chat_participant_one", fields: [participant_one_id], references: [id])
-  participant_two    useraccount?  @relation("chat_participant_two", fields: [participant_two_id], references: [id])
+  participant_one    useraccount   @relation("chat_participant_one", fields: [participant_one_id], references: [id])
+  participant_two    useraccount   @relation("chat_participant_two", fields: [participant_two_id], references: [id])
   patient            patient?      @relation(fields: [patient_id], references: [id], onDelete: Cascade)
   messages           chatmessage[]
 
@@ -471,6 +568,10 @@ model chatconversation {
   // Conversation reuse looks up (A,B,patient) in BOTH participant orders
   @@index([participant_one_id, participant_two_id, patient_id], map: "idx_chat_pair_patient")
   @@index([participant_two_id, participant_one_id, patient_id], map: "idx_chat_pair_patient_rev")
+  // One conversation per participant pair per patient context...
+  @@unique([participant_one_id, participant_two_id, patient_id], map: "uq_chat_pair_patient", where: raw("(patient_id IS NOT NULL)"))
+  // ...and one patientless conversation (e.g. NGO helpline) per participant pair.
+  @@unique([participant_one_id, participant_two_id], map: "uq_chat_pair_no_patient", where: raw("(patient_id IS NULL)"))
 }
 
 model chatmessage {
@@ -486,6 +587,8 @@ model chatmessage {
   sender          useraccount       @relation(fields: [sender_id], references: [id], onDelete: Cascade)
 
   @@index([conversation_id, created_at], map: "idx_chat_history")
+  // Unread counts per conversation (chatController.getConversations groupBy).
+  @@index([conversation_id, is_read], map: "idx_chat_unread")
 }
 
 model callsession {
@@ -521,10 +624,132 @@ model medicaldocument {
   is_private          Boolean                  @default(true)
   uploaded_by         String                   @db.Uuid
   uploaded_at         DateTime                 @default(now()) @db.Timestamptz(6)
-  patient             patient                  @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  verified_by         String?                  @db.Uuid
+  verified_at         DateTime?                @db.Timestamptz(6)
+  patient             patient                  @relation(fields: [patient_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   uploader            useraccount              @relation("doc_uploader", fields: [uploaded_by], references: [id], onDelete: NoAction)
+  verifier            useraccount?             @relation("doc_verifier", fields: [verified_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([patient_id, document_type], map: "idx_medical_doc_patient")
+  @@index([verified_by], map: "idx_medical_doc_verified_by")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Configurable "Today's Check-in" form (versioned)
+// Publishing a change ALWAYS creates a new checkinformversion. Published versions are immutable.
+// Removing a field = publishing a new version without it; old versions/answers are never deleted.
+// ---------------------------------------------------------------------------------------------
+
+// The stable form, e.g. slug "todays_checkin".
+model checkinform {
+  id          String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  slug        String               @unique @db.VarChar(100)
+  title       String               @db.VarChar(255)
+  created_by  String?              @db.Uuid
+  created_at  DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime             @default(now()) @db.Timestamptz(6)
+  creator     useraccount?         @relation("checkinform_creator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  versions    checkinformversion[]
+}
+
+model checkinformversion {
+  id             String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  form_id        String                       @db.Uuid
+  version_number Int
+  status         checkin_version_status_enum  @default(DRAFT)
+  created_by     String?                      @db.Uuid
+  published_by   String?                      @db.Uuid
+  published_at   DateTime?                    @db.Timestamptz(6)
+  archived_at    DateTime?                    @db.Timestamptz(6)
+  created_at     DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime                     @default(now()) @db.Timestamptz(6)
+  form           checkinform                  @relation(fields: [form_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator        useraccount?                 @relation("checkinformversion_creator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  publisher      useraccount?                 @relation("checkinformversion_publisher", fields: [published_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fields         checkinfield[]
+  symptomevent   symptomevent[]
+
+  @@unique([form_id, version_number], map: "uq_checkin_form_version_number")
+  // Exactly one PUBLISHED (active) version per form.
+  @@unique([form_id], map: "uq_checkin_one_published_version", where: raw("(status = 'PUBLISHED'::checkin_version_status_enum)"))
+  // At most ONE draft per form, so two NGO editors cannot fork the form.
+  @@unique([form_id], map: "uq_checkin_one_draft_version", where: raw("(status = 'DRAFT'::checkin_version_status_enum)"))
+  // Fast lookup of the published/active version (and drafts) of a form.
+  @@index([form_id, status], map: "idx_checkin_version_form_status")
+}
+
+model checkinfield {
+  id                String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  version_id        String                   @db.Uuid
+  // Stable key: reuse the same field_key across versions so answers can be compared over time.
+  field_key         String                   @db.VarChar(100)
+  label             String                   @db.VarChar(255)
+  help_text         String?
+  field_type        checkin_field_type_enum
+  is_required       Boolean                  @default(false)
+  display_order     Int
+  // Type-specific validation, e.g. {"min":0,"max":10} for SCALE/NUMBER, {"max_length":500} for TEXT.
+  validation_config Json?
+  created_at        DateTime                 @default(now()) @db.Timestamptz(6)
+  version           checkinformversion       @relation(fields: [version_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  options           checkinfieldoption[]
+  answers           checkinanswer[]
+
+  @@unique([version_id, field_key], map: "uq_checkin_field_key_per_version")
+  @@index([version_id, display_order], map: "idx_checkin_field_order")
+}
+
+model checkinfieldoption {
+  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  field_id      String        @db.Uuid
+  option_value  String        @db.VarChar(100)
+  label         String        @db.VarChar(255)
+  display_order Int
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  field         checkinfield  @relation(fields: [field_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  answers       checkinanswer[]
+
+  @@unique([field_id, option_value], map: "uq_checkin_option_value_per_field")
+  @@index([field_id, display_order], map: "idx_checkin_option_order")
+}
+
+model checkinanswer {
+  id               String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  symptom_event_id String              @db.Uuid
+  field_id         String              @db.Uuid
+  // SINGLE_CHOICE selection; MULTI_CHOICE selections go in value_json (array of option_value).
+  option_id        String?             @db.Uuid
+  value_text       String?
+  value_number     Decimal?            @db.Decimal(12, 4)
+  value_boolean    Boolean?
+  value_json       Json?
+  created_at       DateTime            @default(now()) @db.Timestamptz(6)
+  symptomevent     symptomevent        @relation(fields: [symptom_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  field            checkinfield        @relation(fields: [field_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  option           checkinfieldoption? @relation(fields: [option_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  // One answer per field per submission.
+  @@unique([symptom_event_id, field_id], map: "uq_checkin_answer_event_field")
+  @@index([field_id], map: "idx_checkin_answer_field")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Single central NGO authority (NGO head and counsellor are the SAME account).
+// The primary key is a fixed literal, so the table can hold at most one row. The migration adds
+// CHECK (key = 'CENTRAL'); the backend must always write key = 'CENTRAL' and verify that the
+// account has an active staffprofile with COUNSELLOR or ADMIN before assigning it.
+// ---------------------------------------------------------------------------------------------
+model ngoauthority {
+  key         String      @id @default("CENTRAL") @db.VarChar(20)
+  user_id     String      @unique @db.Uuid
+  assigned_at DateTime    @default(now()) @db.Timestamptz(6)
+  useraccount useraccount @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+enum community_report_status_enum {
+  OPEN
+  REVIEWED
+  DISMISSED
 }
 
 enum post_type_enum {
@@ -671,4 +896,25 @@ enum verification_status_enum {
   PENDING
   VERIFIED
   REJECTED
+}
+
+enum checkin_version_status_enum {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum checkin_field_type_enum {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  SCALE
+  BOOLEAN
+  SINGLE_CHOICE
+  MULTI_CHOICE
+}
+
+enum invite_kind_enum {
+  CAREGIVER
+  PATIENT_CLAIM
 }
