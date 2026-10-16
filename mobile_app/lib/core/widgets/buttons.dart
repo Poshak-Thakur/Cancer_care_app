@@ -13,13 +13,13 @@ class PrimaryButton extends StatelessWidget {
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.warmWhite,
           padding: const EdgeInsets.symmetric(vertical: 15),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           elevation: 0,
         ),
         onPressed: onPressed,
-        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5)),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 17)),
       ),
     );
   }
@@ -42,7 +42,7 @@ class SecondaryButton extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         onPressed: onPressed,
-        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16.5)),
       ),
     );
   }

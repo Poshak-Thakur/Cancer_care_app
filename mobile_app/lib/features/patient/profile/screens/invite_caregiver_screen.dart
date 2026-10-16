@@ -59,7 +59,7 @@ class _InviteCaregiverScreenState extends State<InviteCaregiverScreen> {
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning)),
+                      child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error)),
                     ),
                   _loading
                       ? const SizedBox(height: 52, child: Center(child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary)))

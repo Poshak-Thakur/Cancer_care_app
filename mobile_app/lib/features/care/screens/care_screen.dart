@@ -6,6 +6,7 @@ import '../../../core/widgets/check_row.dart';
 import '../../../core/widgets/info_row.dart';
 import '../../../core/widgets/saathi_card.dart';
 import '../../../core/widgets/section_label.dart';
+import '../../../core/theme/app_fonts.dart';
 
 class CareScreen extends StatefulWidget {
   const CareScreen({super.key});
@@ -26,7 +27,7 @@ class _CareScreenState extends State<CareScreen> {
         return ListView(
           padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
           children: [
-            Text(S.t('yourCare'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+            Text(S.t('yourCare'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
             const SizedBox(height: 2),
             Text(S.t('careSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
 

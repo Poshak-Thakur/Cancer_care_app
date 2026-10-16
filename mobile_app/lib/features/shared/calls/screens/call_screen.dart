@@ -7,6 +7,7 @@ import '../../../../core/realtime/socket_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../models/call_models.dart';
 import '../services/call_service.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Live audio/video call over Agora. The backend supplies the channel name and
 /// a signed token and the Agora App ID.
@@ -40,9 +41,14 @@ class CallScreen extends StatefulWidget {
 class _CallScreenState extends State<CallScreen> {
   static const _ringTimeout = Duration(seconds: 45);
 
+  /// After answering, how long to wait for the caller to be in the channel
+  /// before concluding that they already hung up.
+  static const _peerTimeout = Duration(seconds: 25);
+
   RtcEngine? _engine;
   StreamSubscription<CallStatusUpdate>? _statusSub;
   Timer? _ringTimer;
+  Timer? _peerTimer;
   Timer? _clock;
 
   int? _remoteUid;
@@ -96,6 +102,7 @@ class _CallScreenState extends State<CallScreen> {
         },
         onUserJoined: (connection, remoteUid, elapsed) {
           _ringTimer?.cancel();
+          _peerTimer?.cancel();
           _startClock();
           if (mounted) setState(() => _remoteUid = remoteUid);
         },
@@ -103,6 +110,10 @@ class _CallScreenState extends State<CallScreen> {
           _finish(note: S.t('callEnded'));
         },
         onError: (err, msg) {
+          // While the other side is only ringing (the join was issued, the ring timer runs) an engine
+          // warning must not turn into "couldn't connect": the ring timer decides below, by whether
+          // this phone really joined the channel. Before that, a join error is a real failure.
+          if (_ringTimer?.isActive == true || _peerTimer?.isActive == true) return;
           if (mounted && _remoteUid == null && !_joined) setState(() => _error = S.t('callFailed'));
         },
       ));
@@ -129,9 +140,18 @@ class _CallScreenState extends State<CallScreen> {
       );
 
       if (widget.isCaller) {
-        _ringTimer = Timer(_ringTimeout, () => _finish(note: S.t('callNoAnswer'), missed: true));
+        // Nobody picked up. "No answer" is only the right words if this phone really joined the
+        // channel and waited; if it never got in, the call itself could not connect.
+        _ringTimer = Timer(
+          _ringTimeout,
+          () => _finish(note: _joined ? S.t('callNoAnswer') : S.t('callFailed'), missed: true),
+        );
       } else {
         // The receiver accepted before this screen opened; the clock starts when the caller is present.
+        // If the caller is not there shortly after, they hung up first: end instead of waiting forever.
+        _peerTimer = Timer(_peerTimeout, () {
+          if (_remoteUid == null) _finish(note: S.t('callEnded'));
+        });
       }
     } catch (_) {
       if (mounted) setState(() => _error = S.t('callFailed'));
@@ -148,6 +168,7 @@ class _CallScreenState extends State<CallScreen> {
     if (_ending) return;
     _ending = true;
     _ringTimer?.cancel();
+    _peerTimer?.cancel();
     _clock?.cancel();
     if (notifyServer) {
       // Hanging up before anyone answered counts as missed.
@@ -173,6 +194,7 @@ class _CallScreenState extends State<CallScreen> {
     CallScreen.active = false;
     _statusSub?.cancel();
     _ringTimer?.cancel();
+    _peerTimer?.cancel();
     _clock?.cancel();
     final engine = _engine;
     if (engine != null) {
@@ -263,10 +285,10 @@ class _CallScreenState extends State<CallScreen> {
                   radius: 44,
                   backgroundColor: AppColors.primaryLight,
                   child: Text(widget.peerName.isEmpty ? '?' : widget.peerName[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: AppColors.primaryDeep)),
+                      style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 34, fontWeight: FontWeight.bold, color: AppColors.primaryDeep)),
                 ),
                 const SizedBox(height: 16),
-                Text(widget.peerName, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(widget.peerName, style: const TextStyle(fontFamily: AppFonts.heading, color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 Text(inCall ? _clockText : (widget.isCaller ? S.t('calling') : S.t('connecting')),
                     style: const TextStyle(color: Colors.white70, fontSize: 15)),
@@ -299,7 +321,7 @@ class _CallScreenState extends State<CallScreen> {
                   },
                 ),
                 const SizedBox(width: 18),
-                _roundButton(icon: Icons.call_end, color: Colors.red, onTap: () => _finish()),
+                _roundButton(icon: Icons.call_end, color: AppColors.error, onTap: () => _finish()),
                 if (widget.video) ...[
                   const SizedBox(width: 18),
                   _roundButton(

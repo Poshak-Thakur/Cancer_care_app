@@ -146,9 +146,9 @@ class _EditPatientRecordScreenState extends State<EditPatientRecordScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
-                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning, height: 1.35))),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error, height: 1.35))),
                       ],
                     ),
                   ),

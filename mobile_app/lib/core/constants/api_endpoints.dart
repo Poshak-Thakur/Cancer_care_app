@@ -18,6 +18,11 @@ class ApiEndpoints {
   static const authProfile = '/api/auth/profile'; // PATCH
   static const fcmToken = '/api/auth/fcm-token';
 
+  // direct code-based patient bootstrap & later email linking from Profile
+  static const claimCodeBootstrap = '/api/auth/claim-code';
+  static const linkEmailRequestOtp = '/api/auth/link-email/request-otp';
+  static const linkEmailVerifyOtp = '/api/auth/link-email/verify-otp';
+
   // patients
   static const patients = '/api/patients';
   static const myPatients = '/api/patients/me';

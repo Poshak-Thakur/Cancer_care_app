@@ -8,6 +8,7 @@ import '../../../core/widgets/user_avatar.dart';
 import '../../patient/patient_shell.dart';
 import '../../patient/profile/models/patient_link.dart';
 import '../services/auth_state.dart';
+import '../../../core/theme/app_fonts.dart';
 
 /// Shown when one account can operate more than one patient (their own and/or
 /// family members'). Every patient-specific request afterwards uses the chosen
@@ -27,7 +28,7 @@ class PatientPickerScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
               children: [
-                Text(S.t('choosePatient'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+                Text(S.t('choosePatient'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Text(S.t('choosePatientSub'), style: const TextStyle(fontSize: 14.5, color: AppColors.textSecondary)),
                 const SizedBox(height: 18),

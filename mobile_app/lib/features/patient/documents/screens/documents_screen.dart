@@ -124,12 +124,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       case 'VERIFIED':
         label = S.t('verifiedBadge');
         fg = AppColors.positive;
-        bg = const Color(0xFFEEF1E8);
+        bg = AppColors.sageLight;
         icon = Icons.verified_outlined;
         break;
       case 'REJECTED':
         label = S.t('rejectedBadge');
-        fg = AppColors.warning;
+        fg = AppColors.error;
         bg = AppColors.roseLight;
         icon = Icons.info_outline;
         break;

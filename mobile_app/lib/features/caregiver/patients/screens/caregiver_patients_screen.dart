@@ -15,6 +15,7 @@ import '../../dashboard/screens/caregiver_patient_screen.dart';
 import '../models/linked_patient.dart';
 import '../services/caregiver_service.dart';
 import 'accept_invite_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Caregiver home: the patients this caregiver supports.
 class CaregiverPatientsScreen extends StatefulWidget {
@@ -93,7 +94,7 @@ class _CaregiverPatientsScreenState extends State<CaregiverPatientsScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
             children: [
-              Text(S.t('yourPatients'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+              Text(S.t('yourPatients'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
               const SizedBox(height: 2),
               Text(S.t('yourPatientsSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
               const SizedBox(height: 16),

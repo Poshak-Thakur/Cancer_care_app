@@ -4,9 +4,10 @@ import '../../../core/constants/api_endpoints.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/storage/token_storage.dart';
+import '../../patient/profile/models/patient.dart';
 
-/// The signed-in account, as reported by the backend (verify-otp, /me and
-/// PATCH /profile all return the same user fields).
+/// The signed-in account, as reported by the backend (verify-otp, /me,
+/// claim-code and PATCH /profile all return the same user fields).
 class AuthResult {
   final String userId;
   final String email;
@@ -55,15 +56,44 @@ class AuthResult {
       phoneNumber: u['phone_number'] as String?,
       avatarUrl: u['avatar_url'] as String?,
       preferredLanguage: (u['preferred_language'] as String?) ?? 'en',
-      caregiverType: cg is Map ? cg['caregiver_type'] as String? : null,
-      ngoRecognized: cg is Map && cg['ngo_recognition_status'] == 'RECOGNIZED',
+      caregiverType: cg is Map ? cg['caregiver_type'] as String? : (u['caregiver_type'] as String?),
+      ngoRecognized: (cg is Map && cg['ngo_recognition_status'] == 'RECOGNIZED') ||
+          (u['ngo_recognized'] == true),
       roles: ((u['roles'] as List?) ?? const []).map((e) => e.toString()).toList(),
-      isProfileCompleted: (u['is_profile_completed'] as bool?) ?? ((u['full_name'] as String?)?.isNotEmpty ?? false),
+      isProfileCompleted:
+          (u['is_profile_completed'] as bool?) ?? ((u['full_name'] as String?)?.isNotEmpty ?? false),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': userId,
+        'email': email,
+        'full_name': fullName,
+        'date_of_birth': dateOfBirth?.toIso8601String(),
+        'phone_number': phoneNumber,
+        'avatar_url': avatarUrl,
+        'preferred_language': preferredLanguage,
+        'caregiver_type': caregiverType,
+        'ngo_recognized': ngoRecognized,
+        'roles': roles,
+        'is_profile_completed': isProfileCompleted,
+      };
 }
 
-/// Talks to /api/auth/*. The backend identifies users by email.
+/// Result of redeeming an NGO patient invitation code directly without email/OTP.
+class CodeClaimBootstrapResult {
+  final AuthResult auth;
+  final Patient? patient;
+  final List<String> accessScopes;
+
+  const CodeClaimBootstrapResult({
+    required this.auth,
+    this.patient,
+    this.accessScopes = const ['ALL'],
+  });
+}
+
+/// Talks to /api/auth/*.
 class AuthApiService {
   final ApiClient _api = ApiClient.instance;
 
@@ -76,6 +106,61 @@ class AuthApiService {
     final res = await _api.post(ApiEndpoints.verifyOtp, body: {'email': email, 'otp': otp});
     await TokenStorage.save(access: res['token'] as String, refresh: res['refresh_token'] as String);
     return AuthResult.fromUser(res['user'] as Map<String, dynamic>);
+  }
+
+  /// PATH B ("I have a code"): Redeems the one-time NGO code directly without
+  /// an email/OTP screen, saves the session tokens, and returns the patient's
+  /// account + patient record so the app can open PatientShell immediately.
+  Future<CodeClaimBootstrapResult> claimByCodeBootstrap(String code) async {
+    final res = await _api.post(ApiEndpoints.claimCodeBootstrap, body: {'code': code});
+    final data = (res['data'] is Map<String, dynamic>)
+        ? (res['data'] as Map<String, dynamic>)
+        : res;
+
+    final access = (res['token'] ?? res['accessToken'] ?? data['token'] ?? data['accessToken']) as String;
+    final refresh = (res['refresh_token'] ?? res['refreshToken'] ?? data['refresh_token'] ?? data['refreshToken']) as String;
+    await TokenStorage.save(access: access, refresh: refresh);
+
+    final userMap = Map<String, dynamic>.from((res['user'] ?? data['user']) as Map);
+    if (userMap['roles'] == null || (userMap['roles'] as List).isEmpty) {
+      userMap['roles'] = const ['PATIENT'];
+    }
+    userMap['is_profile_completed'] = true;
+
+    final auth = AuthResult.fromUser(userMap);
+
+    final rawPatient = res['patient'] ?? data['patient'];
+    final Patient? patient = rawPatient is Map
+        ? Patient.fromJson(Map<String, dynamic>.from(rawPatient))
+        : null;
+
+    final rawScopes = res['access_scopes'] ?? data['access_scopes'];
+    final List<String> scopes = rawScopes is List && rawScopes.isNotEmpty
+        ? rawScopes.map((e) => e.toString()).toList()
+        : const ['ALL'];
+
+    return CodeClaimBootstrapResult(
+      auth: auth,
+      patient: patient,
+      accessScopes: scopes,
+    );
+  }
+
+  /// Requests an OTP to attach an email address to the currently signed-in
+  /// account (used from Profile for patients who activated via NGO code).
+  Future<void> requestLinkEmailOtp(String email) async {
+    await _api.post(ApiEndpoints.linkEmailRequestOtp, body: {'email': email.trim().toLowerCase()});
+  }
+
+  /// Verifies the OTP and links the email address to the existing account
+  /// without creating a duplicate user.
+  Future<AuthResult> verifyLinkEmailOtp({required String email, required String otp}) async {
+    final res = await _api.post(
+      ApiEndpoints.linkEmailVerifyOtp,
+      body: {'email': email.trim().toLowerCase(), 'otp': otp.trim()},
+    );
+    final rawUser = (res['data'] is Map ? res['data'] : res['user']) as Map;
+    return AuthResult.fromUser(Map<String, dynamic>.from(rawUser));
   }
 
   Future<AuthResult> me() async {
@@ -121,10 +206,12 @@ class AuthApiService {
     return result;
   }
 
-  /// POST /api/caregivers/avatar (multipart field 'avatar', max 5 MB). The
-  /// route only needs a signed-in user, so patients use it too. Returns the
-  /// permanent public URL.
-  Future<String> uploadAvatar({required Uint8List bytes, required String filename, String mime = 'image/jpeg'}) async {
+  /// POST /api/caregivers/avatar (multipart field 'avatar', max 5 MB).
+  Future<String> uploadAvatar({
+    required Uint8List bytes,
+    required String filename,
+    String mime = 'image/jpeg',
+  }) async {
     final parts = mime.split('/');
     final res = await _api.postMultipart(
       ApiEndpoints.caregiverAvatar,
@@ -135,14 +222,15 @@ class AuthApiService {
       contentType: MediaType(parts.first, parts.length > 1 ? parts[1] : 'jpeg'),
     );
     final url = (res['data'] as Map?)?['avatar_url'] as String?;
-    if (url == null || url.isEmpty) throw const ApiException('Could not save the photo. Please try again.');
+    if (url == null || url.isEmpty) {
+      throw const ApiException('Could not save the photo. Please try again.');
+    }
     return url;
   }
 
   /// Silent sign-in at app start. Returns null when there is no saved session
   /// or the server rejected it (the user must sign in again). Throws
-  /// [ApiException] when the network is down, so the caller can offer a retry
-  /// instead of signing the user out.
+  /// [ApiException] when the network is down.
   Future<AuthResult?> restoreSession() async {
     if (!TokenStorage.hasRefresh) return null;
     switch (await _api.refreshSession()) {
@@ -155,11 +243,10 @@ class AuthApiService {
     }
   }
 
-  /// POST /api/auth/logout, then forget the tokens locally. Local sign-out
-  /// always happens, even if the server cannot be reached.
+  /// POST /api/auth/logout, then forget the tokens locally.
   Future<void> signOut() async {
     try {
-      await _api.ensureFreshToken(); // logout needs a valid access token
+      await _api.ensureFreshToken();
       await _api.post(ApiEndpoints.logout, body: {'refresh_token': TokenStorage.refreshToken});
     } catch (_) {
       // best effort

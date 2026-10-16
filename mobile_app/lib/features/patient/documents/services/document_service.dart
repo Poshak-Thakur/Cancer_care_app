@@ -1,17 +1,37 @@
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/api_exception.dart';
+import '../../../../core/storage/local_offline_storage.dart';
 import '../../../../core/utils/media.dart';
 import '../models/medical_document.dart';
 
 /// Backend limit: 10 MB per file.
 class DocumentService {
   final ApiClient _api = ApiClient.instance;
+  final LocalOfflineStore _cache = LocalOfflineStore.instance;
 
-  /// GET /api/documents/patient/:patientId (newest first, with the
-  /// verification status the NGO team has set).
+  static String _cacheKey(String patientId) => 'patient_documents_$patientId';
+
+  /// GET /api/documents/patient/:patientId (cached locally for offline viewing).
   Future<List<MedicalDocument>> list(String patientId) async {
-    final res = await _api.get(ApiEndpoints.patientDocuments(patientId));
-    return (res['data'] as List).map((e) => MedicalDocument.fromJson(e as Map<String, dynamic>)).toList();
+    final key = _cacheKey(patientId);
+    try {
+      final res = await _api.get(ApiEndpoints.patientDocuments(patientId));
+      final rawList = (res['data'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      await _cache.putCache(cacheKey: key, patientId: patientId, data: rawList);
+      return rawList.map(MedicalDocument.fromJson).toList();
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+      final cached = await _cache.getCache(key);
+      if (cached != null && cached.data is List) {
+        return (cached.data as List)
+            .map((e) => MedicalDocument.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      return const <MedicalDocument>[];
+    }
   }
 
   /// POST /api/documents (multipart field 'file').
@@ -40,8 +60,6 @@ class DocumentService {
   }
 
   /// POST /api/documents/prescriptions/scan (multipart field 'prescription').
-  /// The server stores the photo, reads it with Gemini Vision and returns the
-  /// medications it found. Nothing is saved as a medication until [confirm].
   Future<PrescriptionScan> scanPrescription({
     required String patientId,
     required List<int> bytes,

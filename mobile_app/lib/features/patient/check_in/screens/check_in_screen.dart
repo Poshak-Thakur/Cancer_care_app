@@ -484,7 +484,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               text: f.label,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5, color: AppColors.ink),
               children: [
-                if (f.isRequired) const TextSpan(text: ' *', style: TextStyle(color: AppColors.warning)),
+                if (f.isRequired) const TextSpan(text: ' *', style: TextStyle(color: AppColors.error)),
               ],
             ),
           ),
@@ -497,7 +497,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
           if (err != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(err, style: const TextStyle(fontSize: 12.5, color: AppColors.warning)),
+              child: Text(err, style: const TextStyle(fontSize: 12.5, color: AppColors.error)),
             ),
         ],
       ),
@@ -704,9 +704,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                 const SizedBox(width: 6),
-                Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13.5, color: AppColors.warning))),
+                Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13.5, color: AppColors.error))),
               ],
             ),
           ),
@@ -719,7 +719,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.only(top: 5),
-                  child: Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: _severe ? AppColors.warning : AppColors.positive)),
+                  child: Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: _severe ? AppColors.error : AppColors.positive)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -746,7 +746,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
       if (form.hasUnsupportedRequired)
         Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: Text(S.t('formNeedsUpdate'), style: const TextStyle(fontSize: 13.5, color: AppColors.warning, height: 1.4)),
+          child: Text(S.t('formNeedsUpdate'), style: const TextStyle(fontSize: 13.5, color: AppColors.error, height: 1.4)),
         ),
       for (final f in form.fields.where((f) => f.isSupported)) _fieldBlock(f),
       const SizedBox(height: 8),

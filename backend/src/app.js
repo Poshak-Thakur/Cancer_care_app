@@ -27,9 +27,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-    // req.path only: the query string can carry personal data (e.g. ?search=<patient name>).
-    console.log(`[${req.method}] ${req.path}`);
-    next();
+  // req.path only: the query string can carry personal data (e.g. ?search=<patient name>).
+  console.log(`[${req.method}] ${req.path}`);
+  next();
 });
 
 app.use('/api/auth', authRoutes);
@@ -48,24 +48,32 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/alerts', alertRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'success', message: 'Saathi API is running' });
+  res.status(200).json({
+    status: 'success',
+    app_name: 'Dost - The cancer care companion',
+    message: 'Dost API is running',
+  });
 });
 
 app.use((err, req, res, next) => {
   // Deliberate client errors (e.g. thrown inside a transaction so it rolls back)
   if (err instanceof HttpError) {
     return res.status(err.status).json({
-      status: 'error', message: err.message,
+      status: 'error',
+      message: err.message,
       ...(err.code ? { code: err.code } : {}),
-      ...(err.errors ? { errors: err.errors } : {})
+      ...(err.errors ? { errors: err.errors } : {}),
     });
   }
   // Upload limits (file too large, too many files, unexpected field)
   if (err && err.name === 'MulterError') {
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-    const message = err.code === 'LIMIT_FILE_SIZE' ? 'File is too large.'
-      : err.code === 'LIMIT_UNEXPECTED_FILE' ? 'Too many files, or an unexpected file field.'
-      : `Upload error: ${err.message}`;
+    const message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? 'File is too large.'
+        : err.code === 'LIMIT_UNEXPECTED_FILE'
+          ? 'Too many files, or an unexpected file field.'
+          : `Upload error: ${err.message}`;
     return res.status(status).json({ status: 'error', message });
   }
   // Malformed JSON body

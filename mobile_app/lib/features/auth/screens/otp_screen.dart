@@ -10,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/lang_toggle.dart';
 import '../services/session_router.dart';
+import '../../../core/theme/app_fonts.dart';
 
 class OtpScreen extends StatefulWidget {
   const OtpScreen({super.key});
@@ -125,7 +126,7 @@ class _OtpScreenState extends State<OtpScreen> {
               padding: const EdgeInsets.fromLTRB(22, 10, 22, 28),
               children: [
                 Text(S.t('verifyTitle'),
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                    style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.ink)),
                 const SizedBox(height: 6),
                 Text(S.t('verifySub'),
                     style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary)),
@@ -161,7 +162,7 @@ class _OtpScreenState extends State<OtpScreen> {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: _error != null
-                                  ? AppColors.warning
+                                  ? AppColors.error
                                   : (active ? AppColors.primary : AppColors.ink.withOpacity(0.12)),
                               width: active || _error != null ? 1.8 : 1.2,
                             ),
@@ -195,10 +196,10 @@ class _OtpScreenState extends State<OtpScreen> {
                     padding: const EdgeInsets.only(top: 12),
                     child: Row(
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning)),
+                          child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error)),
                         ),
                       ],
                     ),

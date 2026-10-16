@@ -1,4 +1,4 @@
-/* Alerts, messages, caregiver recognition, community */
+﻿/* Alerts, messages, caregiver recognition, community */
 /* ---------- alerts ---------- */
 const AF={active:{label:'Active',status:'OPEN,ACKNOWLEDGED,IN_PROGRESS'},resolved:{label:'Resolved',status:'RESOLVED'},closed:{label:'Cancelled / exhausted',status:'CANCELLED,ESCALATION_EXHAUSTED'},all:{label:'All',status:''}};
 let AQ={f:'active',page:1};
@@ -19,7 +19,7 @@ function renderAlert(){const a=ALERT,nx=NEXT[a.status],p=a.patient||{};
   ${a.type==='HELP_REQUEST'?'<small>A Help Now request can only be cancelled by the person who sent it.</small>':''}</div></div>`+
   sec('Timeline')+`<div class="card"><div class="tl">${(a.updates||[]).map(u=>`<div><b>${esc(human(u.type))}</b> <small>${esc(fmtDT(u.created_at))} · ${esc(uname(u.created_by_user))}</small><br><span class="pre">${esc(u.note)}</span></div>`).join('')||empty('No updates yet.')}</div>
   <form onsubmit="addAlertNote(event)"><label for="an">Add a note to the timeline</label><textarea id="an" rows="2" required></textarea><p class="err" id="an-e" role="alert"></p><button class="out">Add note</button></form></div>`+
-  sec('Who was notified')+`<div class="card list">${(a.recipients||[]).map(r=>`<div class="lrow"><div class="grow"><b>${esc(uname(r.user))}</b><div class="sub">${esc((r.deliveries||[]).map(d=>human(d.status)).join(', ')||'No delivery record')}</div></div></div>`).join('')||empty('No recipients recorded.')}</div>`)}
+  sec('Who was notified')+'<p class="meta">Push “Sent” means Firebase accepted it for the phone; it does not prove it was displayed. The web portal itself has no phone push, so this account is alerted by the portal’s alert badge, sound and desktop alert.</p>'+`<div class="card list">${(a.recipients||[]).map(r=>`<div class="lrow"><div class="grow"><b>${esc(uname(r.user))}</b><div class="sub">${(r.deliveries||[]).map(deliveryLine).join('<br>')||'No delivery record'}</div></div></div>`).join('')||empty('No recipients recorded.')}</div>`)}
 async function setAlertStatus(s){try{await api(`/admin/alerts/${ALERT.id}/status`,{method:'PATCH',body:{status:s,note:$('#sn').value.trim()||undefined}});toast('Alert updated.');alertDetail(ALERT.id)}catch(x){$('#s-e').textContent=errText(x);if(x.code==='STALE_STATUS'||x.code==='INVALID_TRANSITION')setTimeout(()=>alertDetail(ALERT.id),1800)}}
 async function addAlertNote(e){e.preventDefault();try{await api(`/admin/alerts/${ALERT.id}/updates`,{body:{note:$('#an').value}});toast('Note added.');alertDetail(ALERT.id)}catch(x){$('#an-e').textContent=errText(x)}}
 
@@ -29,15 +29,16 @@ const ctx=c=>c.patient_id?'About '+esc(pn(c)):'Direct conversation';
 const other=c=>c.participant_one&&c.participant_one.id===S.user.id?c.participant_two:c.participant_one;
 async function messages(cid){shell(skel,'/messages');clearTimer();
   try{const r=await api('/chat/conversations');const list=r.data;cid=cid||(list[0]||{}).id;const cur=list.find(c=>c.id===cid);
+    list.forEach(c=>{const o=other(c);if(o&&o.id)PEERS[o.id]=uname(o)});
     main(head('Messages','Conversations with patients, caregivers and delegates')+`<div class="chat"><div class="card list">${list.map(c=>{const o=other(c),m=c.messages&&c.messages[0];return`<div class="lrow conv ${c.id===cid?'on':''}" onclick="location.hash='#/messages/${U(c.id)}'" tabindex="0">${av(uname(o))}<div class="grow"><b>${esc(uname(o))}</b><div class="sub">${ctx(c)}</div><div class="sub clip">${m?esc(m.message_type==='TEXT'?m.content:'['+human(m.message_type)+']'):'No messages yet'}</div></div>${c.unread_count>0?`<span class="badge alert">${c.unread_count} new</span>`:''}</div>`}).join('')||empty('No conversations yet. Open a patient and press Message next to a family member or caregiver.')}</div><div class="card chatwrap" id="cpane">${cur?'':empty('Select a conversation.')}</div></div>`);
     if(cur)openConv(cur)}catch(e){main(stateErr(e,()=>messages(cid)))}}
 function bubbles(ms,o){let last='';return ms.map(m=>{const dt=new Date(m.created_at).toDateString(),sep=dt!==last?`<div class="dchip">${esc(dt)}</div>`:'',tm=new Date(m.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});last=dt;
-  const body=m.message_type==='IMAGE'&&m.media_url?`<img src="${esc(m.media_url)}" alt="Shared image">`:m.message_type==='AUDIO'&&m.media_url?`<audio controls src="${esc(m.media_url)}"></audio>`:esc(m.content||'');
+  const body=m.message_type==='IMAGE'&&m.media_url?`<img src="${esc(m.media_url)}" alt="Shared image">`:m.message_type==='AUDIO'&&m.media_url?`<audio controls preload="metadata" src="${esc(m.media_url)}"></audio>`:esc(m.content||'');
   if(m.message_type==='SYSTEM')return sep+`<div class="sys">${esc(m.content)}</div>`;
   return sep+(m.sender_id===S.user.id?`<div class="mrow me"><div><div class="bub c">${body}</div><small>${tm}</small></div></div>`:`<div class="mrow">${av(uname(o))}<div><div class="bub p">${body}</div><small>${tm}</small></div></div>`)}).join('')}
 let CONV=null;
 async function openConv(c){CONV=c;const o=other(c),pane=$('#cpane');
-  pane.innerHTML=`<div class="chead">${av(uname(o))}<div><b class="big">${esc(uname(o))}</b><div class="sub">${ctx(c)} · <span id="plink"></span></div></div></div><div class="banner">${ic('shield',22)}<span>Keep messages about care. Avoid sharing full medical records in chat.</span></div><div class="msgs" id="ms">${skel}</div><form onsubmit="sendMsg(event)"><input id="mt" placeholder="Type a message…" aria-label="Message" autocomplete="off"><button class="sendbtn" aria-label="Send message">${ic('send')}</button></form>`;
+  pane.innerHTML=`<div class="chead">${av(uname(o))}<div><b class="big">${esc(uname(o))}</b><div class="sub">${ctx(c)} · <span id="plink"></span></div></div><span class="grow"></span><button class="out" onclick="callFromChat('AUDIO')">Voice call</button><button class="out" onclick="callFromChat('VIDEO')">Video call</button></div><div class="banner">${ic('shield',22)}<span>Keep messages about care. Avoid sharing full medical records in chat.</span></div><div class="msgs" id="ms">${skel}</div><div id="rec" hidden></div><form onsubmit="sendMsg(event)"><button type="button" class="out" id="micbtn" onclick="recStart()" aria-label="Record a voice note" title="Record a voice note">🎤</button><input id="mt" placeholder="Type a message…" aria-label="Message" autocomplete="off"><button class="sendbtn" aria-label="Send message">${ic('send')}</button></form>`;
   if(c.patient)$('#plink').innerHTML=`<a class="back" href="#/patients/${U(c.patient.id)}">Open patient</a>`;
   await refreshMsgs(true);clearTimer();TIMER=setInterval(()=>refreshMsgs(false),10000)}
 async function refreshMsgs(scroll){const el=$('#ms');if(!el||!CONV)return;try{const r=await api('/chat/messages/'+CONV.id),near=el.scrollHeight-el.scrollTop-el.clientHeight<80;el.innerHTML=bubbles(r.data,other(CONV))||'<p class="meta">No messages yet. Say hello.</p>';if(scroll||near)el.scrollTop=el.scrollHeight}catch(x){if(scroll)el.innerHTML=stateErr(x,()=>refreshMsgs(true))}}
@@ -74,3 +75,41 @@ async function publishPost(e){e.preventDefault();const t=$('#pt').value,fd=new F
   if(t==='POLL')fd.append('poll_options',JSON.stringify($('#pp').value.split('\n').map(x=>x.trim()).filter(Boolean)));
   if(t==='IMAGE'||t==='VIDEO')[...$('#pf').files].forEach(f=>fd.append('media',f));
   try{const r=await api('/community/posts',{body:fd});toast(r.message||'Post published.');feed()}catch(x){$('#pe2').textContent=errText(x)}}
+
+/* ---------- alert delivery wording (fields come from alertdelivery: channel, delivery_status, failure_reason, *_at) ---------- */
+const FAIL_TEXT=r=>!r?'':r==='NO_DEVICE_TOKEN'?'no phone registered for notifications':r==='FIREBASE_NOT_INITIALIZED'?'server push is not configured':/^FCM_ERROR:/.test(r)?'rejected by Firebase ('+r.slice(10)+')':r;
+const deliveryLine=d=>{const st=d.delivery_status,cls=st==='FAILED'?'alert':st==='SENT'||st==='DELIVERED'||st==='SEEN'?'ok':'warn',at=d.sent_at||d.failed_at||d.queued_at;
+  return`${esc(human(d.channel||'PUSH'))}: ${tag(st,cls)}${d.failure_reason?' '+esc(FAIL_TEXT(d.failure_reason)):''}${at?` <small>${esc(fmtDT(at))}</small>`:''}`};
+
+/* ---------- voice notes (record -> preview -> upload to /chat/upload-audio -> send as AUDIO message) ---------- */
+let REC=null;const REC_MAX_S=300,AUDIO_MAX_BYTES=10*1024*1024;
+const recMime=()=>{if(typeof MediaRecorder==='undefined')return'';return['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'].find(t=>{try{return MediaRecorder.isTypeSupported(t)}catch{return false}})||''};
+const micState=async()=>{try{return(await navigator.permissions.query({name:'microphone'})).state}catch{return'unknown'}};
+function micHelp(kind){const p=$('#rec');if(!p)return;p.hidden=false;
+  const msg=kind==='blocked'?'<b>The microphone is blocked for this site.</b> Click the lock icon (🔒) next to the address bar → <b>Microphone → Allow</b>. Chrome only applies the change after you <b>reload this page</b>.'
+    :kind==='none'?'<b>No microphone was found</b> on this computer. Plug one in or choose one in the browser’s site settings.'
+    :kind==='busy'?'<b>The microphone is in use</b> by another program or browser tab. Close it and try again.':'<b>Could not start recording.</b>';
+  p.innerHTML=`<div class="banner" style="margin:8px 0;display:block">${msg}<div class="row2" style="margin-top:8px"><button type="button" class="out" onclick="location.reload()">Reload page</button><button type="button" class="out" onclick="$('#rec').hidden=true;recStart()">Try again</button><button type="button" class="out" onclick="$('#rec').hidden=true">Close</button></div></div>`}
+async function recStart(){if(REC)return;
+  if(!navigator.mediaDevices||typeof MediaRecorder==='undefined'){toast('Voice notes are not supported in this browser.',1);return}
+  if(await micState()==='denied'){micHelp('blocked');return}
+  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true}),mime=recMime(),mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+    REC={mr,stream,chunks:[],t0:Date.now(),state:'recording',conv:CONV&&CONV.id,mime:mr.mimeType||mime||'audio/webm'};
+    mr.ondataavailable=e=>{if(e.data&&e.data.size)REC&&REC.chunks.push(e.data)};
+    mr.onstop=()=>{if(!REC)return;stream.getTracks().forEach(t=>t.stop());if(REC.state==='cancelled')return;REC.blob=new Blob(REC.chunks,{type:REC.mime});REC.url=URL.createObjectURL(REC.blob);REC.state='review';recRender()};
+    mr.start();REC.tick=setInterval(()=>{const s=Math.floor((Date.now()-REC.t0)/1000);const el=$('#rectime');if(el)el.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');if(s>=REC_MAX_S)recStop()},500);recRender()}
+  catch(x){REC=null;console.error('[voice note] getUserMedia failed',x);micHelp(/NotAllowed|Permission/i.test(String(x.name))?'blocked':/NotFound/i.test(String(x.name))?'none':/NotReadable/i.test(String(x.name))?'busy':'other')}}
+function recStop(){if(REC&&REC.state==='recording'){clearInterval(REC.tick);REC.mr.stop()}}
+function cancelRec(){if(!REC)return;const r=REC;REC=null;clearInterval(r.tick);r.state='cancelled';try{if(r.mr.state!=='inactive')r.mr.stop()}catch{}try{r.stream.getTracks().forEach(t=>t.stop())}catch{}if(r.url)URL.revokeObjectURL(r.url);const p=$('#rec');if(p){p.hidden=true;p.innerHTML=''}const b=$('#micbtn');if(b)b.disabled=false}
+function recRender(){const p=$('#rec');if(!p||!REC)return;p.hidden=false;$('#micbtn').disabled=true;
+  p.innerHTML=REC.state==='recording'?`<div class="banner" style="margin:8px 0"><b style="color:var(--red,#B33)">● Recording</b> <span id="rectime">0:00</span> <button type="button" class="out" onclick="recStop()">Stop</button> <button type="button" class="out" onclick="cancelRec()">Cancel</button></div>`
+    :`<div class="banner" style="margin:8px 0"><audio controls src="${esc(REC.url)}"></audio> <button type="button" class="green" id="recsend" onclick="recSend()">Send voice note</button> <button type="button" class="out" onclick="cancelRec()">Discard</button></div>`}
+async function recSend(){const r=REC;if(!r||!r.blob||!CONV||CONV.id!==r.conv)return;
+  if(r.blob.size>AUDIO_MAX_BYTES){toast('This recording is larger than 10 MB. Record a shorter note.',1);return}
+  const btn=$('#recsend');if(btn)btn.disabled=true;
+  try{const fd=new FormData();fd.append('audio',r.blob,'voice-note.'+(/mp4/.test(r.mime)?'m4a':'webm'));
+    const up=await api('/chat/upload-audio',{body:fd});
+    await api('/chat/send',{body:{conversation_id:CONV.id,message_type:'AUDIO',media_url:up.data.media_url}});
+    cancelRec();toast('Voice note sent.');refreshMsgs(true)}
+  catch(x){toast(errText(x),1);if(btn)btn.disabled=false}}
+

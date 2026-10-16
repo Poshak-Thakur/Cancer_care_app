@@ -5,7 +5,7 @@ const cfgText=f=>{const c=f.validation_config||{};const b=Object.entries(c).map(
 const fieldRow=(f,ed)=>`<div class="field"><div class="row"><b>${esc(f.label)}</b>${tag(f.field_type)}${f.is_required?tag('Required','warn'):''}<span class="mono meta">${esc(f.field_key)}</span>${ed?`<span class="grow"></span><button class="out" onclick="editField('${U(f.id)}')">Edit</button><button class="red" onclick="removeField('${U(f.id)}')">Remove</button>`:''}</div>${f.help_text?`<div class="sub">${esc(f.help_text)}</div>`:''}${cfgText(f)?`<div class="sub">${esc(cfgText(f))}</div>`:''}${(f.options||[]).length?`<div class="sub">Options: ${f.options.map(o=>esc(o.label)).join(' · ')}</div>`:''}</div>`;
 async function forms(){shell(skel,'/forms');try{const r=await api('/admin/check-in-forms/current');FORM=r.data;renderForms()}catch(e){main(stateErr(e,()=>forms()))}}
 function renderForms(){const{published:pub,draft}=FORM;
-  main(head("Today's check-in form",'Questions patients answer in the Saathi app. Published versions never change; edit a draft, then publish it.')+
+  main(head("Today's check-in form",'Questions patients answer in the Dost app. Published versions never change; edit a draft, then publish it.')+
   sec(`Published ${pub?'· version '+pub.version_number:''}`,pub?`<small>Published ${fmtDT(pub.published_at)}</small>`:'')+`<div class="card">${pub?pub.fields.map(f=>fieldRow(f,false)).join('')||empty('This version has no questions.'):empty('Nothing is published yet, so patients see the default check-in.')}</div>`+
   sec(draft?`Draft · version ${draft.version_number}`:'Draft')+(draft?`<div class="card">${draft.fields.map(f=>fieldRow(f,true)).join('')||empty('The draft has no questions yet.')}<div class="row2"><button class="out" onclick="EDIT={};renderForms()">+ Add question</button><button class="green" onclick="publishDraft()">Publish draft</button></div></div>${EDIT?fieldForm(EDIT,draft):''}`:`<div class="card"><p>To change the form, start a draft. It begins as a copy of the published version, and patients do not see it until you publish.</p><button onclick="newDraft()">Start a draft</button></div>`))}
 async function newDraft(){try{await api('/admin/check-in-forms/drafts',{body:{}});toast('Draft ready.');forms()}catch(x){toast(errText(x),1)}}
@@ -40,7 +40,7 @@ const _rf=renderForms;renderForms=function(){_rf();if(EDIT)typeChanged()};
 /* ---------- audit log (read-only) ---------- */
 let UQ={page:1,action:'',target_resource:'',target_id:'',from:'',to:''};
 async function audit(){shell(skel,'/audit');
-  main(head('Audit log','A read-only record of important actions in Saathi.')+`<div class="card"><div class="row">${[['action','Action e.g. ALERT_STATUS_CHANGED'],['target_resource','Resource e.g. alert']].map(([k,p])=>`<input id="u-${k}" placeholder="${p}" value="${esc(UQ[k])}" aria-label="${p}">`).join('')}<input id="u-target_id" placeholder="Target ID (UUID)" value="${esc(UQ.target_id)}" aria-label="Target id" style="min-width:280px"><label class="chk" style="margin:0">From <input id="u-from" type="date" value="${esc(UQ.from)}"></label><label class="chk" style="margin:0">To <input id="u-to" type="date" value="${esc(UQ.to)}"></label><button class="out" onclick="applyAudit()">Filter</button><button class="out" onclick="UQ={page:1,action:'',target_resource:'',target_id:'',from:'',to:''};audit()">Clear</button></div></div><div id="alog">${skel}</div>`);loadAudit()}
+  main(head('Audit log','A read-only record of important actions in Dost.')+`<div class="card"><div class="row">${[['action','Action e.g. ALERT_STATUS_CHANGED'],['target_resource','Resource e.g. alert']].map(([k,p])=>`<input id="u-${k}" placeholder="${p}" value="${esc(UQ[k])}" aria-label="${p}">`).join('')}<input id="u-target_id" placeholder="Target ID (UUID)" value="${esc(UQ.target_id)}" aria-label="Target id" style="min-width:280px"><label class="chk" style="margin:0">From <input id="u-from" type="date" value="${esc(UQ.from)}"></label><label class="chk" style="margin:0">To <input id="u-to" type="date" value="${esc(UQ.to)}"></label><button class="out" onclick="applyAudit()">Filter</button><button class="out" onclick="UQ={page:1,action:'',target_resource:'',target_id:'',from:'',to:''};audit()">Clear</button></div></div><div id="alog">${skel}</div>`);loadAudit()}
 function applyAudit(){['action','target_resource','target_id','from','to'].forEach(k=>UQ[k]=$('#u-'+k).value.trim());UQ.page=1;loadAudit()}
 async function loadAudit(){const el=$('#alog');el.innerHTML=skel;try{const r=await api('/admin/audit-logs'+qs({...UQ,limit:25}));
   el.innerHTML=`<div class="card" style="overflow:auto"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Resource</th><th>Details</th></tr></thead><tbody>${r.data.map(l=>`<tr><td>${esc(fmtDT(l.created_at))}</td><td>${esc(l.actor?uname(l.actor):'System')}</td><td><span class="mono">${esc(l.action)}</span></td><td>${esc(l.target_resource)}<br><span class="mono meta">${esc(String(l.target_id).slice(0,8))}…</span></td><td style="white-space:normal;text-align:left">${l.payload?`<details><summary>View</summary><pre class="mono pre">${esc(JSON.stringify(l.payload,null,2))}</pre></details>`:'—'}</td></tr>`).join('')||`<tr><td colspan="5">${empty('No log entries match.')}</td></tr>`}</tbody></table></div>${pager(r.pagination,'goUPage')}`}catch(e){el.innerHTML=stateErr(e,()=>loadAudit())}}
@@ -48,7 +48,7 @@ const goUPage=n=>{UQ.page=n;loadAudit()};
 
 
 /* ---------- global review pages (server-side paginated endpoints; nothing is scanned or capped in the browser) ---------- */
-const noEndpoint=(e,what)=>e&&e.status===404?Object.assign(e,{message:what+' is not available on this server. The backend must provide the paginated admin endpoint (see docs/API_CONTRACT_CHECKLIST.md).'}):e;
+const noEndpoint=(e,what)=>e&&e.status===404?Object.assign(e,{message:what+' is not available on this server. The backend must provide the paginated admin endpoint.'}):e;
 let DQ={page:1};
 async function documentsReview(){shell(skel,'/documents');
   main(head('Document review','Documents waiting for verification, oldest first')+'<div id="rdocs">'+skel+'</div>');loadDocs()}
@@ -72,7 +72,7 @@ async function loadEvents(read){if(read)EVQ={...EVQ,date:$('#cd').value||istToda
 const goEvPage=n=>{EVQ.page=n;loadEvents(false)};
 
 /* ---------- router ---------- */
-function route(){clearTimer();const h=location.hash.slice(1)||'/dashboard',[,a,b]=h.split('/');
+function route(){clearTimer();if(typeof cancelRec==='function')cancelRec();const h=location.hash.slice(1)||'/dashboard',[,a,b]=h.split('/');
   if(!S){if(a!=='login'){location.hash='#/login';return}return login()}
   if(a==='login'){location.hash='#/dashboard';return}
   if(b&&['patients','alerts','messages'].includes(a)&&!isUuid(b)){shell('<div class="card state"><h2>Not found</h2><p>That link is not valid.</p><a class="back" href="#/dashboard">Back to dashboard</a></div>','/'+a);return}

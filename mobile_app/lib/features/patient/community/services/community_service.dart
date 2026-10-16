@@ -1,5 +1,7 @@
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/api_exception.dart';
+import '../../../../core/storage/local_offline_storage.dart';
 import '../../../../core/utils/media.dart';
 import '../models/post.dart';
 
@@ -12,24 +14,38 @@ class PostMedia {
 
 class CommunityService {
   final ApiClient _api = ApiClient.instance;
+  final LocalOfflineStore _cache = LocalOfflineStore.instance;
 
-  /// GET /api/community/feed: approved public posts, newest first (max 50).
+  static const _feedCacheKey = 'community_feed';
+  static String _commentsCacheKey(String postId) => 'community_comments_$postId';
+
+  /// GET /api/community/feed: approved public posts, newest first (cached for offline reading).
   Future<List<Post>> feed() async {
-    final res = await _api.get(ApiEndpoints.communityFeed);
-    return (res['data'] as List).map((e) => Post.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    try {
+      final res = await _api.get(ApiEndpoints.communityFeed);
+      final rawList = (res['data'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      await _cache.putCache(cacheKey: _feedCacheKey, data: rawList);
+      return rawList.map(Post.fromJson).toList();
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+      final cached = await _cache.getCache(_feedCacheKey);
+      if (cached != null && cached.data is List) {
+        return (cached.data as List)
+            .map((e) => Post.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      return const <Post>[];
+    }
   }
 
   /// POST /api/community/posts (multipart; up to 5 files under 'media').
-  /// Regular users' posts are PENDING until a moderator approves them.
-  /// [visibility] PUBLIC or PRIVATE (private = shared only with the NGO
-  /// counsellor, never in the feed). Returns the backend's message and status.
   Future<({String message, String status})> createPost({
     required String content,
     String visibility = 'PUBLIC',
     List<PostMedia> media = const [],
   }) async {
-    // The backend ties media to the post type: IMAGE -> image/*, VIDEO ->
-    // video/*, TEXT -> no files. Photos and a video are never mixed.
     final hasVideo = media.any((m) => isVideoUrl(m.filename));
     final type = media.isEmpty ? 'TEXT' : (hasVideo ? 'VIDEO' : 'IMAGE');
     final res = await _api.postMultipartFiles(
@@ -39,11 +55,22 @@ class CommunityService {
         'post_type': type,
         'visibility': visibility,
       },
-      files: [for (final m in media) UploadFile(field: 'media', bytes: m.bytes, filename: m.filename, contentType: mediaTypeFor(m.filename))],
+      files: [
+        for (final m in media)
+          UploadFile(
+            field: 'media',
+            bytes: m.bytes,
+            filename: m.filename,
+            contentType: mediaTypeFor(m.filename),
+          ),
+      ],
       timeout: const Duration(seconds: 180),
     );
     final data = res['data'] as Map?;
-    return (message: (res['message'] as String?) ?? '', status: (data?['status'] as String?) ?? 'PENDING');
+    return (
+      message: (res['message'] as String?) ?? '',
+      status: (data?['status'] as String?) ?? 'PENDING',
+    );
   }
 
   /// POST /api/community/posts/:id/like (toggles). Returns the new state.
@@ -57,8 +84,24 @@ class CommunityService {
   }
 
   Future<List<PostComment>> comments(String postId) async {
-    final res = await _api.get(ApiEndpoints.postComments(postId));
-    return (res['data'] as List).map((e) => PostComment.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    final key = _commentsCacheKey(postId);
+    try {
+      final res = await _api.get(ApiEndpoints.postComments(postId));
+      final rawList = (res['data'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      await _cache.putCache(cacheKey: key, data: rawList);
+      return rawList.map(PostComment.fromJson).toList();
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+      final cached = await _cache.getCache(key);
+      if (cached != null && cached.data is List) {
+        return (cached.data as List)
+            .map((e) => PostComment.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      return const <PostComment>[];
+    }
   }
 
   /// POST /api/community/poll/:optionId/vote (one vote per poll).

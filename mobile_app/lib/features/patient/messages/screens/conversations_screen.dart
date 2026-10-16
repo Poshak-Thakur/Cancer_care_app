@@ -16,6 +16,7 @@ import '../models/care_contact.dart';
 import '../models/chat_message.dart';
 import '../services/chat_service.dart';
 import 'chat_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Inbox: every conversation the user is in (care team, family and the NGO
 /// helpline), newest first, with unread markers. Refreshes live when a new
@@ -105,7 +106,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
             children: [
               if (widget.embedded) ...[
-                Text(S.t('messages'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+                Text(S.t('messages'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 2),
                 Text(S.t('messagesSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
                 const SizedBox(height: 16),

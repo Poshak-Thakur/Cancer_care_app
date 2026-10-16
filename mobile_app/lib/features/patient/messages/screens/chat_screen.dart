@@ -312,8 +312,8 @@ class _ChatScreenState extends State<ChatScreen> {
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
         child: Row(
           children: [
-            IconButton(tooltip: S.t('cancel'), icon: const Icon(Icons.delete_outline), color: AppColors.warning, onPressed: _cancelRecording),
-            const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
+            IconButton(tooltip: S.t('cancel'), icon: const Icon(Icons.delete_outline), color: AppColors.error, onPressed: _cancelRecording),
+            const Icon(Icons.fiber_manual_record, color: AppColors.error, size: 14),
             const SizedBox(width: 8),
             Expanded(child: Text('${S.t('recording')} $_recElapsed', style: const TextStyle(fontSize: 15))),
             IconButton.filled(

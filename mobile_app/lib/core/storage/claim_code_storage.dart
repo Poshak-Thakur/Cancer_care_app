@@ -1,6 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// Keeps the "code from Saathi" between the code screen and the moment the
+/// Keeps the "code from Dost" between the code screen and the moment the
 /// user has signed in (email + OTP). The code is a secret: it lives only in
 /// secure storage, never in logs, and is removed after any final result
 /// (success, refused code, "already set up", "too many attempts") and on

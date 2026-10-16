@@ -9,6 +9,7 @@ import '../../../patient/messages/models/care_contact.dart';
 import '../models/call_models.dart';
 import '../services/call_service.dart';
 import 'call_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Full-screen "ringing" UI, opened when the socket delivers `incomingCall`.
 class IncomingCallScreen extends StatefulWidget {
@@ -117,7 +118,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                     style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.primaryDeep)),
               ),
               const SizedBox(height: 18),
-              Text(name, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+              Text(name, style: const TextStyle(fontFamily: AppFonts.heading, color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(widget.call.isVideo ? S.t('incomingVideo') : S.t('incomingAudio'),
                   style: const TextStyle(color: Colors.white70, fontSize: 15)),
@@ -125,8 +126,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _action(Icons.call_end, Colors.red, S.t('decline'), _decline),
-                  _action(widget.call.isVideo ? Icons.videocam : Icons.call, Colors.green, S.t('accept'), _accept),
+                  _action(Icons.call_end, AppColors.error, S.t('decline'), _decline),
+                  _action(widget.call.isVideo ? Icons.videocam : Icons.call, AppColors.leafGreen, S.t('accept'), _accept),
                 ],
               ),
               const SizedBox(height: 48),

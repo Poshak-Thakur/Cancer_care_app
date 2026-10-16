@@ -7,6 +7,7 @@ import '../../auth/screens/login_screen.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/saathi_card.dart';
 import '../../../core/widgets/section_label.dart';
+import '../../../core/theme/app_fonts.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -19,7 +20,7 @@ class ProfileScreen extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
           children: [
-            Text(S.t('yourProfile'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+            Text(S.t('yourProfile'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
             const SizedBox(height: 2),
             Text(S.t('profileSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
             const SizedBox(height: 18),
@@ -30,7 +31,7 @@ class ProfileScreen extends StatelessWidget {
                   CircleAvatar(
                     radius: 26,
                     backgroundColor: AppColors.roseLight,
-                    child: Text(AuthState.initial, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.roseText)),
+                    child: Text(AuthState.initial, style: const TextStyle(fontFamily: AppFonts.heading, fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.roseText)),
                   ),
                   const SizedBox(width: 14),
                   Column(
@@ -99,7 +100,7 @@ class ProfileScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(S.t('signOutTitle'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text(S.t('signOutTitle'), style: const TextStyle(fontFamily: AppFonts.heading, fontWeight: FontWeight.bold, fontSize: 18)),
         content: Text(S.t('signOutBody'), style: const TextStyle(fontSize: 14.5, height: 1.45, color: AppColors.textSecondary)),
         actions: [
           TextButton(

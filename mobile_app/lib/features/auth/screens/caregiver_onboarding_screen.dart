@@ -13,6 +13,8 @@ import '../../caregiver/caregiver_shell.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_state.dart';
 import '../widgets/role_card.dart';
+import '../../../core/theme/app_fonts.dart';
+import '../../../core/theme/app_text.dart';
 
 /// Caregiver profile completion: full name + date of birth + FAMILY or
 /// VOLUNTEER, saved with PATCH /api/auth/profile (this is what marks the
@@ -100,11 +102,11 @@ class _CaregiverOnboardingScreenState extends State<CaregiverOnboardingScreen> {
               children: [
                 const Row(children: [Spacer(), LangToggle()]),
                 const SizedBox(height: 14),
-                Text(S.t('cgWelcome'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                Text(S.t('cgWelcome'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 Text(S.t('cgWelcomeSub'), style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary, height: 1.45)),
                 const SizedBox(height: 22),
-                Text(S.t('fullName'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+                Text(S.t('fullName').toUpperCase(), style: AppText.eyebrow),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _name,
@@ -120,7 +122,7 @@ class _CaregiverOnboardingScreenState extends State<CaregiverOnboardingScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Text(S.t('dob'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+                Text(S.t('dob').toUpperCase(), style: AppText.eyebrow),
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: _pickDob,
@@ -172,9 +174,9 @@ class _CaregiverOnboardingScreenState extends State<CaregiverOnboardingScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
-                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error))),
                       ],
                     ),
                   ),

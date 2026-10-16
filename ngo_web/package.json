@@ -1,13 +1,12 @@
 {
-  "name": "saathi-ngo-portal",
+  "name": "dost-ngo-portal",
   "version": "2.1.0",
-  "description": "Static NGO counsellor web client for the Saathi backend",
+  "description": "Dost - The cancer care companion (NGO Counsellor Web Portal)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test:static": "node tests/static-checks.js",
-    "test:integration": "node tests/integration/portal-e2e.js"
+    "start": "node server.js"
   },
-  "dependencies": { "express": "^4.19.2" },
-  "devDependencies": { "jsdom": "^24.0.0" }
+  "dependencies": {
+    "express": "^4.19.2"
+  }
 }

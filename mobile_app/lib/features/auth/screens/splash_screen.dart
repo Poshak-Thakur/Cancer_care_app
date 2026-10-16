@@ -1,12 +1,14 @@
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_fonts.dart';
+import '../../../core/theme/app_text.dart';
 import '../../../core/widgets/dragonfly_mark.dart';
 import 'session_gate_screen.dart';
+import '../../../core/constants/app_brand.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -67,15 +69,22 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Saathi',
+                  AppBrand.name,
                   style: TextStyle(
+                    fontFamily: AppFonts.heading,
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
                     color: AppColors.bg,
                     letterSpacing: 0.2,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
+                Text(
+                  AppBrand.tagline.toUpperCase(),
+                  textAlign: TextAlign.center,
+                  style: AppText.eyebrow.copyWith(color: AppColors.primaryLight),
+                ),
+                const SizedBox(height: 14),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Text(

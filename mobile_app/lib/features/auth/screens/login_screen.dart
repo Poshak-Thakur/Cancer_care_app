@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../../core/constants/app_brand.dart';
 import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/storage/claim_code_storage.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_fonts.dart';
+import '../../../core/theme/app_text.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/dragonfly_mark.dart';
 import '../../../core/widgets/lang_toggle.dart';
@@ -15,8 +18,6 @@ import 'claim_code_screen.dart';
 import 'otp_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  /// True after the user entered a Saathi code: patient only, same email and
-  /// OTP steps; the code is claimed once the OTP is verified.
   final bool claimMode;
   const LoginScreen({super.key, this.claimMode = false});
 
@@ -60,8 +61,6 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     final email = _email.text.trim().toLowerCase();
-    // The normal "Get started" path never carries a code left over from an
-    // earlier attempt.
     if (!widget.claimMode) await ClaimCodeStorage.clear();
     setState(() {
       _showError = false;
@@ -100,74 +99,112 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     const DragonflyMark(size: 28, color: AppColors.rose),
                     const SizedBox(width: 8),
-                    const Text('Saathi',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primaryDeep)),
+                    const Text(
+                      AppBrand.name,
+                      style: TextStyle(
+                        fontFamily: AppFonts.heading,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: AppColors.primaryDeep,
+                      ),
+                    ),
                     const Spacer(),
                     const LangToggle(),
                   ],
                 ),
                 const SizedBox(height: 34),
-                Text(S.t('welcomeTitle'),
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                Text(
+                  S.t('welcomeTitle'),
+                  style: const TextStyle(
+                    fontFamily: AppFonts.heading,
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.ink,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text(S.t('welcomeSub'),
-                    style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary, height: 1.45)),
+                Text(
+                  S.t('welcomeSub'),
+                  style: const TextStyle(
+                    fontSize: 15.5,
+                    color: AppColors.textSecondary,
+                    height: 1.45,
+                  ),
+                ),
                 const SizedBox(height: 26),
-
                 if (widget.claimMode) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(
+                      color: AppColors.roseLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: Row(
                       children: [
                         const Icon(Icons.vpn_key_outlined, size: 18, color: AppColors.roseText),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(S.t('claimUsing'), style: const TextStyle(fontSize: 13.5, color: AppColors.roseText, fontWeight: FontWeight.w600)),
+                          child: Text(
+                            S.t('claimUsing'),
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: AppColors.roseText,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                         if (_claimCode != null)
-                          Text('••••${_claimCode!.substring(_claimCode!.length - 2)}',
-                              style: const TextStyle(fontSize: 13.5, color: AppColors.roseText, letterSpacing: 1)),
+                          Text(
+                            '••••${_claimCode!.substring(_claimCode!.length - 2)}',
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: AppColors.roseText,
+                              letterSpacing: 1,
+                            ),
+                          ),
                         TextButton(
                           onPressed: () => Navigator.of(context).pop(),
-                          child: Text(S.t('claimChange'), style: const TextStyle(color: AppColors.roseText, fontWeight: FontWeight.bold)),
+                          child: Text(
+                            S.t('claimChange'),
+                            style: const TextStyle(
+                              color: AppColors.roseText,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 22),
                 ] else ...[
-                Text(S.t('iAmA'),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: RoleCard(
-                        icon: Icons.favorite_border,
-                        title: S.t('rolePatient'),
-                        subtitle: S.t('rolePatientSub'),
-                        selected: _role == 'patient',
-                        onTap: () => setState(() => _role = 'patient'),
+                  Text(S.t('iAmA').toUpperCase(), style: AppText.eyebrow),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: RoleCard(
+                          icon: Icons.favorite_border,
+                          title: S.t('rolePatient'),
+                          subtitle: S.t('rolePatientSub'),
+                          selected: _role == 'patient',
+                          onTap: () => setState(() => _role = 'patient'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: RoleCard(
-                        icon: Icons.volunteer_activism_outlined,
-                        title: S.t('roleCaregiver'),
-                        subtitle: S.t('roleCaregiverSub'),
-                        selected: _role == 'caregiver',
-                        onTap: () => setState(() => _role = 'caregiver'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: RoleCard(
+                          icon: Icons.volunteer_activism_outlined,
+                          title: S.t('roleCaregiver'),
+                          subtitle: S.t('roleCaregiverSub'),
+                          selected: _role == 'caregiver',
+                          onTap: () => setState(() => _role = 'caregiver'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 22),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
                 ],
-
-                Text(S.t('emailLabel'),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+                Text(S.t('emailLabel').toUpperCase(), style: AppText.eyebrow),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _email,
@@ -188,8 +225,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     fillColor: AppColors.surface,
                     prefixIcon: const Icon(Icons.mail_outline, color: AppColors.textSecondary),
                     contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                    enabledBorder: _border(message != null ? AppColors.warning : AppColors.ink.withOpacity(0.12)),
-                    focusedBorder: _border(message != null ? AppColors.warning : AppColors.primary, width: 1.8),
+                    enabledBorder: _border(
+                      message != null ? AppColors.error : AppColors.ink.withOpacity(0.12),
+                    ),
+                    focusedBorder: _border(
+                      message != null ? AppColors.error : AppColors.primary,
+                      width: 1.8,
+                    ),
                   ),
                 ),
                 if (message != null)
@@ -198,17 +240,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: Text(message,
-                              style: const TextStyle(fontSize: 13, color: AppColors.warning, height: 1.35)),
+                          child: Text(
+                            message,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.error,
+                              height: 1.35,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 const SizedBox(height: 20),
-
                 _sending
                     ? const SizedBox(
                         height: 52,
@@ -216,26 +263,46 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: SizedBox(
                             width: 26,
                             height: 26,
-                            child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                       )
-                    : PrimaryButton(label: widget.claimMode ? S.t('sendOtp') : S.t('getStarted'), onPressed: _sendOtp),
+                    : PrimaryButton(
+                        label: widget.claimMode ? S.t('sendOtp') : S.t('getStarted'),
+                        onPressed: _sendOtp,
+                      ),
                 if (!widget.claimMode) ...[
                   const SizedBox(height: 10),
                   SecondaryButton(
                     label: S.t('haveCode'),
-                    onPressed: _sending ? () {} : () => AppRoutes.push(context, const ClaimCodeScreen()),
+                    onPressed: _sending
+                        ? () {}
+                        : () => AppRoutes.push(context, const ClaimCodeScreen()),
                   ),
                 ],
                 const SizedBox(height: 12),
-                Text(S.t('otpNote'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.textFaint, height: 1.4)),
+                Text(
+                  S.t('otpNote'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: AppColors.textFaint,
+                    height: 1.4,
+                  ),
+                ),
                 const SizedBox(height: 22),
-                Text(S.t('termsNote'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textFaint, height: 1.4)),
+                Text(
+                  S.t('termsNote'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textFaint,
+                    height: 1.4,
+                  ),
+                ),
               ],
             ),
           ),

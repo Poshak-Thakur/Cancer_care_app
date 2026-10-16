@@ -112,7 +112,7 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
         content: Text(S.t('leavePatientBody')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(S.t('cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.warning))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.error))),
         ],
       ),
     );
@@ -222,7 +222,7 @@ class _CaregiverPatientScreenState extends State<CaregiverPatientScreen> {
                     label: S.t('careTeam'),
                     onPressed: () => AppRoutes.push(context, CareTeamScreen(patientId: widget.link.patient.id, embedded: false)),
                   ),
-                  Center(child: TextButton(onPressed: _leave, child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.warning)))),
+                  Center(child: TextButton(onPressed: _leave, child: Text(S.t('leavePatient'), style: const TextStyle(color: AppColors.error)))),
                 ],
               ),
             ),

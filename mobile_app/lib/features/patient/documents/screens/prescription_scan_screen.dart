@@ -7,6 +7,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/buttons.dart';
 import '../models/medical_document.dart';
 import '../services/document_service.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Photograph a prescription -> the server reads it (Gemini Vision) -> the
 /// person reviews and edits the medicines in a bottom sheet -> confirm saves
@@ -120,9 +121,9 @@ class _PrescriptionScanScreenState extends State<PrescriptionScanScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                          const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                           const SizedBox(width: 6),
-                          Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13.5, color: AppColors.warning))),
+                          Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13.5, color: AppColors.error))),
                         ],
                       ),
                     ),
@@ -231,7 +232,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text(S.t('reviewMedicines'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+                  Expanded(child: Text(S.t('reviewMedicines'), style: const TextStyle(fontFamily: AppFonts.heading, fontWeight: FontWeight.bold, fontSize: 18))),
                   IconButton(onPressed: _saving ? null : () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
                 ],
               ),
@@ -250,7 +251,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                           children: [
                             Row(children: [
                               Expanded(child: TextField(controller: _ctrls[i][0], decoration: _dec(S.t('medName')))),
-                              IconButton(onPressed: () => _remove(i), icon: const Icon(Icons.delete_outline, color: AppColors.warning)),
+                              IconButton(onPressed: () => _remove(i), icon: const Icon(Icons.delete_outline, color: AppColors.error)),
                             ]),
                             const SizedBox(height: 8),
                             Row(children: [
@@ -268,7 +269,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                 ),
               ),
               if (_error != null)
-                Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error))),
               _saving
                   ? const SizedBox(height: 52, child: Center(child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary)))
                   : PrimaryButton(label: S.t('confirmSave'), onPressed: _confirm),

@@ -21,6 +21,7 @@ import '../models/care_event.dart';
 import '../services/care_event_service.dart';
 import '../widgets/today_checklist_card.dart';
 import 'add_care_event_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Care plan for one day (India Standard Time): medicines, appointments and
 /// tasks, with a day picker, an AI-assisted "add" flow and shortcuts to
@@ -139,7 +140,7 @@ class _CareScreenState extends State<CareScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
             children: [
-              Text(S.t('yourCare'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+              Text(S.t('yourCare'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
               const SizedBox(height: 2),
               Text(S.t('careSub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
               const SizedBox(height: 14),

@@ -16,6 +16,7 @@ import '../../../auth/services/auth_state.dart';
 import '../models/post.dart';
 import '../services/community_service.dart';
 import 'video_player_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 /// Community feed: stories, likes, comments, polls and photos. Posts by regular
 /// users are reviewed by a moderator before they appear in the feed.
@@ -138,7 +139,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
             children: [
-              Text(S.t('community'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+              Text(S.t('community'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold)),
               const SizedBox(height: 2),
               Text(S.t('communitySub'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
               const SizedBox(height: 14),
@@ -585,7 +586,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(S.t('shareStory'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text(S.t('shareStory'), style: const TextStyle(fontFamily: AppFonts.heading, fontWeight: FontWeight.bold, fontSize: 18)),
             const SizedBox(height: 12),
             TextField(
               controller: _text,
@@ -651,7 +652,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
               subtitle: Text(_private ? S.t('privateNote') : S.t('reviewNote'), style: const TextStyle(fontSize: 12.5)),
             ),
             if (_error != null)
-              Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+              Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error))),
             const SizedBox(height: 4),
             _sending
                 ? const SizedBox(height: 52, child: Center(child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary)))

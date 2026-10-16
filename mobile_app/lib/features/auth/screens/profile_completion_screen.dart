@@ -5,6 +5,7 @@ import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../shared/profile/edit_profile_screen.dart';
+import '../../../core/theme/app_fonts.dart';
 
 /// Shown once when the signed-in account has no name yet
 /// (`is_profile_completed == false`) but is not a brand-new patient or
@@ -34,7 +35,7 @@ class ProfileCompletionScreen extends StatelessWidget {
                   const Spacer(),
                   const Icon(Icons.person_outline, size: 48, color: AppColors.primary),
                   const SizedBox(height: 16),
-                  Text(S.t('completeProfile'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  Text(S.t('completeProfile'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(S.t('completeProfileSub'), style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary, height: 1.45)),
                   const Spacer(),

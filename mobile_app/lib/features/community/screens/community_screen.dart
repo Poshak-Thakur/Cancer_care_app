@@ -231,7 +231,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
               ),
               decoration: BoxDecoration(
                 color: post.badgeKey == 'reviewedOn'
-                    ? const Color(0xFFEEF1E8)
+                    ? AppColors.sageLight
                     : AppColors.primaryLight,
                 borderRadius: BorderRadius.circular(999),
               ),

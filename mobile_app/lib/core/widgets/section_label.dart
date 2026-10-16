@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
+import '../theme/app_text.dart';
 
+/// Small uppercase label above a group of content (Cinzel, from the theme).
 class SectionLabel extends StatelessWidget {
   final String text;
   const SectionLabel(this.text, {super.key});
@@ -9,15 +10,7 @@ class SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 6, bottom: 10),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 12.5,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.3,
-          color: AppColors.textFaint,
-        ),
-      ),
+      child: Text(text.toUpperCase(), style: AppText.eyebrow),
     );
   }
 }

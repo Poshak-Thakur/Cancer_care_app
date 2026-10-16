@@ -131,9 +131,9 @@ class _AcceptInviteScreenState extends State<AcceptInviteScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
-                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error))),
                       ],
                     ),
                   ),

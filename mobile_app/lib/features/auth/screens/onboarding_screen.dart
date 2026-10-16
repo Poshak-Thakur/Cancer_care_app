@@ -13,6 +13,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/lang_toggle.dart';
 import '../../patient/patient_shell.dart';
+import '../../../core/theme/app_fonts.dart';
+import '../../../core/theme/app_text.dart';
 
 /// Step 1 of onboarding per UI/UX Spec 4.4: name, date of birth, language.
 /// That is the entire gate; no medical fields are requested here.
@@ -120,7 +122,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 const Row(children: [Spacer(), LangToggle()]),
                 const SizedBox(height: 18),
                 Text(S.t('onbTitle'),
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.ink)),
+                    style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 26, fontWeight: FontWeight.bold, color: AppColors.ink)),
                 const SizedBox(height: 6),
                 Text(S.t('onbSub'),
                     style: const TextStyle(fontSize: 15.5, color: AppColors.textSecondary, height: 1.45)),
@@ -208,9 +210,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                        const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                         const SizedBox(width: 6),
-                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.error))),
                       ],
                     ),
                   ),
@@ -239,7 +241,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _label(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+        child: Text(t.toUpperCase(), style: AppText.eyebrow),
       );
 
   OutlineInputBorder _border(Color c, {double width = 1.2}) => OutlineInputBorder(

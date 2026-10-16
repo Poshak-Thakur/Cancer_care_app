@@ -11,6 +11,8 @@ import '../../../core/widgets/saathi_card.dart';
 import '../../../core/widgets/saathi_logo.dart';
 import '../../../core/widgets/section_label.dart';
 import '../../checkin/screens/checkin_screen.dart';
+import '../../../core/theme/app_fonts.dart';
+import '../../../core/constants/app_brand.dart';
 
 class HomeScreen extends StatefulWidget {
   final void Function(int index) onNavigate;
@@ -39,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Saathi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.primaryDeep)),
+                    Text(AppBrand.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.primaryDeep)),
                     Text('Itti Foundation', style: TextStyle(fontSize: 11, color: AppColors.textFaint)),
                   ],
                 ),
@@ -48,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 20),
-            Text(S.greeting(AuthState.firstName), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold, color: AppColors.ink)),
+            Text(S.greeting(AuthState.firstName), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold, color: AppColors.ink)),
             const SizedBox(height: 2),
             Text(S.t('howFeeling'), style: const TextStyle(fontSize: 15, color: AppColors.textSecondary)),
             const SizedBox(height: 18),

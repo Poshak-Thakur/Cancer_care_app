@@ -45,7 +45,7 @@ class _SymptomHistoryScreenState extends State<SymptomHistoryScreen> {
     }
   }
 
-  Color _color(int sev) => sev >= 8 ? AppColors.warning : (sev >= 5 ? AppColors.rose : AppColors.positive);
+  Color _color(int sev) => sev >= 8 ? AppColors.error : (sev >= 5 ? AppColors.rose : AppColors.positive);
 
   /// Backend codes (PAIN_LEVEL, WATER_INTAKE...) -> translated label.
   String _label(String type) {

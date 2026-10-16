@@ -10,6 +10,7 @@ import '../../../../core/widgets/buttons.dart';
 import '../models/care_event.dart';
 import '../services/care_event_service.dart';
 import '../widgets/care_event_labels.dart';
+import '../../../../core/theme/app_text.dart';
 
 /// Add a task or appointment. Type or dictate a sentence ("Chemo session
 /// tomorrow at 10 AM"): the server's AI turns it into a type, title, place
@@ -234,8 +235,8 @@ class _AddCareEventScreenState extends State<AddCareEventScreen> {
           Expanded(
             child: OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                foregroundColor: _listening ? Colors.red : AppColors.primary,
-                side: BorderSide(color: _listening ? Colors.red : AppColors.primary, width: 1.5),
+                foregroundColor: _listening ? AppColors.error : AppColors.primary,
+                side: BorderSide(color: _listening ? AppColors.error : AppColors.primary, width: 1.5),
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
@@ -318,7 +319,7 @@ class _AddCareEventScreenState extends State<AddCareEventScreen> {
 
   Widget _label(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+        child: Text(t.toUpperCase(), style: AppText.eyebrow),
       );
 
   Widget _errorRow(String m) => Padding(
@@ -326,9 +327,9 @@ class _AddCareEventScreenState extends State<AddCareEventScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+            const Icon(Icons.info_outline, size: 16, color: AppColors.error),
             const SizedBox(width: 6),
-            Expanded(child: Text(m, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+            Expanded(child: Text(m, style: const TextStyle(fontSize: 13, color: AppColors.error))),
           ],
         ),
       );

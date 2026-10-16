@@ -2,28 +2,26 @@ import 'package:flutter/material.dart';
 import '../../../core/authorization/access_guard.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/ist.dart';
 import '../../../core/widgets/info_row.dart';
 import '../../../core/widgets/saathi_card.dart';
 import '../../auth/services/auth_state.dart';
 import '../../patient/dashboard/models/dashboard_overview.dart';
+import '../helpline/helpline_screen.dart';
 import 'alert_service.dart';
 
-// ---------------------------------------------------------------------------
-// Type-aware wording. A manual Help Now must never read like a detected
-// severe symptom, so every alert type has its own title and description.
-// ---------------------------------------------------------------------------
-
 /// True when the signed-in user sent this Help Now.
-bool _isMine(DashboardAlert a) => a.requestedByUserId != null && a.requestedByUserId == AuthState.userId;
+bool _isMine(DashboardAlert a) =>
+    a.requestedByUserId != null && a.requestedByUserId == AuthState.userId;
 
 String alertTitleFor(DashboardAlert a) {
   switch (a.type) {
     case AlertType.helpRequest:
       return S.t(_isMine(a) ? 'alertHelpMineTitle' : 'alertHelpOtherTitle');
     case AlertType.deterioration:
-      return S.t('alertTitle'); // "We noticed a severe symptom"
+      return S.t('alertTitle');
     case AlertType.missedMedication:
       return S.t('alertMissedMedTitle');
     case AlertType.missedFollowup:
@@ -80,8 +78,6 @@ IconData alertIconFor(DashboardAlert a) {
   }
 }
 
-/// Alerts to show on a dashboard: manual help requests first (so they are
-/// never pushed out by automatic alerts), then the rest, at most [max].
 List<DashboardAlert> visibleAlerts(List<DashboardAlert> alerts, {int max = 3}) {
   final help = alerts.where((a) => a.isHelpRequest);
   final others = alerts.where((a) => !a.isHelpRequest);
@@ -90,18 +86,8 @@ List<DashboardAlert> visibleAlerts(List<DashboardAlert> alerts, {int max = 3}) {
 
 String _when(DateTime t) => '${Ist.shortDay(Ist.dayOf(t))} · ${Ist.clock(t)}';
 
-// ---------------------------------------------------------------------------
-// Alert card (patient dashboard, caregiver patient screen, alert detail)
-// ---------------------------------------------------------------------------
-
-/// One alert with a type-specific title/description, its current status and
-/// time. Shows "Cancel help request" only for the requester's own Help Now in a
-/// cancellable status; the backend still has the final say.
 class AlertCard extends StatefulWidget {
   final DashboardAlert alert;
-
-  /// Called after a successful cancellation or after the backend refused it
-  /// (so the owner reloads the real state).
   final VoidCallback? onChanged;
 
   const AlertCard({super.key, required this.alert, this.onChanged});
@@ -121,7 +107,10 @@ class _AlertCardState extends State<AlertCard> {
         content: Text(S.t('cancelHelpBody')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(S.t('keepRequest'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(S.t('cancelHelpRequest'), style: const TextStyle(color: AppColors.warning))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(S.t('cancelHelpRequest'), style: const TextStyle(color: AppColors.error)),
+          ),
         ],
       ),
     );
@@ -151,8 +140,6 @@ class _AlertCardState extends State<AlertCard> {
           msg = S.t('helpCancelFailed');
       }
       messenger.showSnackBar(SnackBar(content: Text(msg)));
-      // The request was refused for a definite reason (not a network problem):
-      // reload so the card shows what the backend really has.
       if (e.statusCode != null) widget.onChanged?.call();
     }
   }
@@ -170,7 +157,8 @@ class _AlertCardState extends State<AlertCard> {
             icon: alertIconFor(a),
             rose: true,
             title: alertTitleFor(a),
-            subtitle: '${alertDescriptionFor(a)}\n${S.t('alertStatusLabel')}: ${alertStatusText(a.status)} · ${_when(a.createdAt)}',
+            subtitle:
+                '${alertDescriptionFor(a)}\n${S.t('alertStatusLabel')}: ${alertStatusText(a.status)} · ${_when(a.createdAt)}',
           ),
           if (canCancel)
             Align(
@@ -178,11 +166,21 @@ class _AlertCardState extends State<AlertCard> {
               child: _busy
                   ? const Padding(
                       padding: EdgeInsets.only(top: 10, right: 12),
-                      child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.roseText)),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.roseText),
+                      ),
                     )
                   : TextButton(
                       onPressed: _cancel,
-                      child: Text(S.t('cancelHelpRequest'), style: const TextStyle(color: AppColors.roseText, fontWeight: FontWeight.w600)),
+                      child: Text(
+                        S.t('cancelHelpRequest'),
+                        style: const TextStyle(
+                          color: AppColors.roseText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
             ),
         ],
@@ -191,24 +189,25 @@ class _AlertCardState extends State<AlertCard> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Help Now button card
-// ---------------------------------------------------------------------------
-
 /// The obvious "Help now" action: asks for confirmation (and an optional note),
-/// then POST /api/alerts/help-now. The same client_event_id is reused when the
-/// same press is retried after a network failure.
+/// then POST /api/alerts/help-now.
+///
+/// Offline-first safety guarantee:
+/// If the phone is offline, this NEVER queues silently or claims that help was
+/// requested. Instead, it displays an explicit modal dialog warning that the
+/// alert was NOT sent because there is no internet connection, with options to
+/// retry immediately or open the Helpline.
 class HelpNowCard extends StatefulWidget {
   final String patientId;
-
-  /// True on a caregiver's selected-patient screen (the wording is about the
-  /// patient, not "you").
   final bool forPatient;
-
-  /// Called after a request was recorded, so the dashboard reloads its alerts.
   final VoidCallback? onChanged;
 
-  const HelpNowCard({super.key, required this.patientId, this.forPatient = false, this.onChanged});
+  const HelpNowCard({
+    super.key,
+    required this.patientId,
+    this.forPatient = false,
+    this.onChanged,
+  });
 
   @override
   State<HelpNowCard> createState() => _HelpNowCardState();
@@ -220,8 +219,11 @@ class _HelpNowCardState extends State<HelpNowCard> {
 
   Future<void> _press() async {
     if (_busy) return;
-    final note = await showDialog<String>(context: context, builder: (_) => const _HelpNowDialog());
-    if (note == null || !mounted) return; // dismissed
+    final note = await showDialog<String>(
+      context: context,
+      builder: (_) => const _HelpNowDialog(),
+    );
+    if (note == null || !mounted) return;
     await _send(note);
   }
 
@@ -230,8 +232,12 @@ class _HelpNowCardState extends State<HelpNowCard> {
     final messenger = ScaffoldMessenger.of(context);
     _pendingEventId ??= AlertService.newClientEventId();
     try {
-      final r = await AlertService().helpNow(patientId: widget.patientId, clientEventId: _pendingEventId!, note: note);
-      _pendingEventId = null; // done: the next press is a new request
+      final r = await AlertService().helpNow(
+        patientId: widget.patientId,
+        clientEventId: _pendingEventId!,
+        note: note,
+      );
+      _pendingEventId = null;
       if (!mounted) return;
       setState(() => _busy = false);
       final key = r.replay ? 'helpNowReplay' : (r.created ? 'helpNowSent' : 'helpNowMerged');
@@ -240,11 +246,53 @@ class _HelpNowCardState extends State<HelpNowCard> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      // A definite refusal (4xx) ends this attempt; only network/server
-      // failures keep the id so a retry stays idempotent.
-      if (e.statusCode != null && e.statusCode! < 500) _pendingEventId = null;
-      if (AccessGuard.handle(context, e)) return;
-      messenger.showSnackBar(SnackBar(content: Text(S.t('helpNowFailed'))));
+      if (e.statusCode != null && e.statusCode! < 500) {
+        _pendingEventId = null;
+        if (AccessGuard.handle(context, e)) return;
+        messenger.showSnackBar(SnackBar(content: Text(S.t('helpNowFailed'))));
+        return;
+      }
+
+      // Network / offline failure: explicitly warn the patient that the urgent
+      // alert has NOT reached the care team.
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.wifi_off, color: AppColors.error),
+              const SizedBox(width: 8),
+              Expanded(child: Text(S.t('helpNowOfflineTitle'))),
+            ],
+          ),
+          content: Text(S.t('helpNowOfflineBody')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(S.t('close')),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                AppRoutes.push(context, const HelplineScreen());
+              },
+              child: Text(S.t('ngoHelpline')),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.roseText,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _send(note);
+              },
+              child: Text(S.t('retry')),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -268,7 +316,14 @@ class _HelpNowCardState extends State<HelpNowCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(S.t('helpNow'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+                      Text(
+                        S.t('helpNow'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                        ),
+                      ),
                       const SizedBox(height: 1),
                       Text(
                         S.t(widget.forPatient ? 'helpNowSubFor' : 'helpNowSub'),
@@ -278,7 +333,11 @@ class _HelpNowCardState extends State<HelpNowCard> {
                   ),
                 ),
                 if (_busy)
-                  const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                  )
                 else
                   const Icon(Icons.chevron_right, color: Colors.white),
               ],
@@ -290,8 +349,6 @@ class _HelpNowCardState extends State<HelpNowCard> {
   }
 }
 
-/// Confirmation with an optional note. Pops the note ('' when empty) on send,
-/// or null when dismissed.
 class _HelpNowDialog extends StatefulWidget {
   const _HelpNowDialog();
 
@@ -322,9 +379,12 @@ class _HelpNowDialogState extends State<_HelpNowDialog> {
             controller: _note,
             minLines: 2,
             maxLines: 4,
-            maxLength: 1000, // backend limit
+            maxLength: 1000,
             textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(hintText: S.t('helpNowNoteHint'), border: const OutlineInputBorder()),
+            decoration: InputDecoration(
+              hintText: S.t('helpNowNoteHint'),
+              border: const OutlineInputBorder(),
+            ),
           ),
         ],
       ),
@@ -332,7 +392,10 @@ class _HelpNowDialogState extends State<_HelpNowDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: Text(S.t('cancel'))),
         TextButton(
           onPressed: () => Navigator.pop(context, _note.text.trim()),
-          child: Text(S.t('helpNowSend'), style: const TextStyle(color: AppColors.roseText, fontWeight: FontWeight.bold)),
+          child: Text(
+            S.t('helpNowSend'),
+            style: const TextStyle(color: AppColors.roseText, fontWeight: FontWeight.bold),
+          ),
         ),
       ],
     );

@@ -4,6 +4,7 @@ import '../../../core/localization/lang.dart';
 import '../../../core/localization/strings.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_text.dart';
 import '../../../core/utils/ist.dart';
 import '../../../core/widgets/buttons.dart';
 import '../../../core/widgets/user_avatar.dart';
@@ -22,7 +23,8 @@ class EditProfileScreen extends StatefulWidget {
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _api = AuthApiService();
-  late final TextEditingController _name = TextEditingController(text: AuthState.accountName ?? AuthState.displayName);
+  late final TextEditingController _name =
+      TextEditingController(text: AuthState.accountName ?? AuthState.displayName);
   late final TextEditingController _phone = TextEditingController(text: AuthState.phone ?? '');
   DateTime? _dob = AuthState.accountDob ?? AuthState.patient?.dateOfBirth;
   late bool _hindi = Lang.isHindi.value;
@@ -48,15 +50,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: const Icon(Icons.photo_camera_outlined), title: Text(S.t('takePhoto')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-            ListTile(leading: const Icon(Icons.photo_library_outlined), title: Text(S.t('chooseFromGallery')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(S.t('takePhoto')),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(S.t('chooseFromGallery')),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
           ],
         ),
       ),
     );
     if (source == null) return;
     try {
-      final file = await ImagePicker().pickImage(source: source, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
+      final file = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
       if (file == null) return;
       setState(() {
         _uploading = true;
@@ -64,9 +79,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       });
       final bytes = await file.readAsBytes();
       final lower = file.name.toLowerCase();
-      final mime = lower.endsWith('.png') ? 'image/png' : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      final mime = lower.endsWith('.png')
+          ? 'image/png'
+          : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
       final url = await _api.uploadAvatar(bytes: bytes, filename: file.name, mime: mime);
       AuthState.avatarUrl = url;
+      await AuthState.persistSession();
       if (!mounted) return;
       setState(() {
         _avatarUrl = url;
@@ -153,7 +171,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       children: [
                         UserAvatar(url: _avatarUrl, initial: AuthState.initial, radius: 48),
                         if (_uploading)
-                          const Positioned.fill(child: Center(child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary))),
+                          const Positioned.fill(
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
                         Positioned(
                           right: 0,
                           bottom: 0,
@@ -162,8 +187,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             borderRadius: BorderRadius.circular(999),
                             child: Container(
                               padding: const EdgeInsets.all(8),
-                              decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primary),
-                              child: const Icon(Icons.photo_camera_outlined, size: 18, color: Colors.white),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.primary,
+                              ),
+                              child: const Icon(
+                                Icons.photo_camera_outlined,
+                                size: 18,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
@@ -171,7 +203,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Center(child: TextButton(onPressed: _pickAvatar, child: Text(S.t('changePhoto')))),
+                  Center(
+                    child: TextButton(
+                      onPressed: _pickAvatar,
+                      child: Text(S.t('changePhoto')),
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   _label(S.t('fullName')),
                   TextField(
@@ -186,10 +223,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     onTap: _pickDob,
                     borderRadius: BorderRadius.circular(14),
                     child: InputDecorator(
-                      decoration: _dec(null).copyWith(suffixIcon: const Icon(Icons.calendar_today_outlined, size: 20, color: AppColors.primary)),
+                      decoration: _dec(null).copyWith(
+                        suffixIcon: const Icon(
+                          Icons.calendar_today_outlined,
+                          size: 20,
+                          color: AppColors.primary,
+                        ),
+                      ),
                       child: Text(
                         _dob == null ? S.t('pickDate') : Ist.dateLabel(_dob!),
-                        style: TextStyle(fontSize: 16, color: _dob == null ? AppColors.textFaint : AppColors.ink),
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: _dob == null ? AppColors.textFaint : AppColors.ink,
+                        ),
                       ),
                     ),
                   ),
@@ -204,15 +250,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   _label(S.t('emailLabel')),
                   InputDecorator(
                     decoration: _dec(null).copyWith(fillColor: AppColors.bg),
-                    child: Text(AuthState.email, style: const TextStyle(fontSize: 16, color: AppColors.textSecondary)),
+                    child: Text(
+                      AuthState.hasEmail ? AuthState.email : S.t('emailNotLinkedYet'),
+                      style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
+                    ),
                   ),
                   const SizedBox(height: 18),
                   _label(S.t('prefLang')),
                   Row(
                     children: [
-                      Expanded(child: _langChip('English', !_hindi, () => setState(() => _hindi = false))),
+                      Expanded(
+                        child: _langChip('English', !_hindi, () => setState(() => _hindi = false)),
+                      ),
                       const SizedBox(width: 12),
-                      Expanded(child: _langChip('हिन्दी', _hindi, () => setState(() => _hindi = true))),
+                      Expanded(
+                        child: _langChip('हिन्दी', _hindi, () => setState(() => _hindi = true)),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 22),
@@ -222,14 +275,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                          const Icon(Icons.info_outline, size: 16, color: AppColors.error),
                           const SizedBox(width: 6),
-                          Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.warning))),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: const TextStyle(fontSize: 13, color: AppColors.error),
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   _saving
-                      ? const SizedBox(height: 52, child: Center(child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary)))
+                      ? const SizedBox(
+                          height: 52,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        )
                       : PrimaryButton(label: S.t('saveChanges'), onPressed: _save),
                 ],
               ),
@@ -242,7 +308,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Widget _label(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textFaint)),
+        child: Text(t.toUpperCase(), style: AppText.eyebrow),
       );
 
   InputDecoration _dec(String? hint) => InputDecoration(
@@ -250,8 +316,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         filled: true,
         fillColor: AppColors.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.ink.withOpacity(0.12), width: 1.2)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 1.8)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.ink.withOpacity(0.12), width: 1.2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.8),
+        ),
       );
 
   Widget _langChip(String label, bool selected, VoidCallback onTap) {
@@ -263,14 +335,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         decoration: BoxDecoration(
           color: selected ? AppColors.primaryLight : AppColors.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? AppColors.primary : AppColors.ink.withOpacity(0.12), width: selected ? 1.8 : 1.2),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.ink.withOpacity(0.12),
+            width: selected ? 1.8 : 1.2,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (selected) const Icon(Icons.check, size: 18, color: AppColors.primary),
             if (selected) const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: selected ? AppColors.primaryDeep : AppColors.textSecondary)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: selected ? AppColors.primaryDeep : AppColors.textSecondary,
+              ),
+            ),
           ],
         ),
       ),

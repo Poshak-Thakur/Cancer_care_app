@@ -14,6 +14,7 @@ import '../../../patient/messages/models/care_contact.dart';
 import '../../../shared/helpline/helpline_screen.dart';
 import '../../patients/screens/accept_invite_screen.dart';
 import '../../../shared/profile/edit_profile_screen.dart';
+import '../../../../core/theme/app_fonts.dart';
 
 class CaregiverProfileScreen extends StatefulWidget {
   /// Called after a patient was linked (so the Patients tab reloads).
@@ -67,7 +68,7 @@ class _CaregiverProfileScreenState extends State<CaregiverProfileScreen> {
           children: [
             Row(
               children: [
-                Expanded(child: Text(S.t('profile'), style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold))),
+                Expanded(child: Text(S.t('profile'), style: const TextStyle(fontFamily: AppFonts.heading, fontSize: 21, fontWeight: FontWeight.bold))),
                 const LangToggle(),
               ],
             ),

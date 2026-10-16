@@ -1,43 +1,50 @@
 import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/storage/local_offline_storage.dart';
+import '../../../../core/sync/sync_engine.dart';
+import '../../../../core/utils/ist.dart';
 import '../../../../core/utils/uuid.dart';
 import '../models/check_in_form.dart';
 import '../models/symptom_event.dart';
 
 /// How a question is answered.
 enum CheckInKind {
-  /// Four ordered answers (best to worst) sent as `severity`.
   levels,
-
-  /// A typed number sent as `numeric_value` + `unit` (e.g. 2.5 litres).
   number,
 }
 
-/// One question on the check-in screen. The list below drives the whole
-/// screen, so adding a symptom is a one-line change here (plus its labels in
-/// strings.dart).
 class CheckInQuestion {
-  final String key; // S.t key of the label
-  final String code; // observation_type sent to the backend
+  final String key;
+  final String code;
   final IconCodes icon;
   final CheckInKind kind;
-  final List<String> levelKeys; // levels: four answers, best (0) to worst (3)
-  final String? unit; // number: unit sent with the value
-  final String? unitLabelKey; // number: S.t key shown next to the field
-  final bool extra; // shown under "More symptoms"
+  final List<String> levelKeys;
+  final String? unit;
+  final String? unitLabelKey;
+  final bool extra;
 
-  const CheckInQuestion.levels(this.key, this.code, this.icon, this.levelKeys, {this.extra = false})
-      : kind = CheckInKind.levels,
+  const CheckInQuestion.levels(
+    this.key,
+    this.code,
+    this.icon,
+    this.levelKeys, {
+    this.extra = false,
+  })  : kind = CheckInKind.levels,
         unit = null,
         unitLabelKey = null;
 
-  const CheckInQuestion.number(this.key, this.code, this.icon, {required String this.unit, required String this.unitLabelKey, this.extra = true})
-      : kind = CheckInKind.number,
+  const CheckInQuestion.number(
+    this.key,
+    this.code,
+    this.icon, {
+    required String this.unit,
+    required String this.unitLabelKey,
+    this.extra = true,
+  })  : kind = CheckInKind.number,
         levelKeys = const [];
 }
 
-/// Icon names kept as plain data so this file stays free of Flutter imports.
 enum IconCodes { pain, fatigue, appetite, mood, nausea, breathing, dizzy, water, sleep }
 
 const checkInQuestions = [
@@ -54,18 +61,16 @@ const checkInQuestions = [
 
 class CheckInService {
   final ApiClient _api = ApiClient.instance;
+  final LocalOfflineStore _cache = LocalOfflineStore.instance;
 
-  /// Severity sent for each of the four answers (best to worst). The backend
-  /// raises a DETERIORATION alert for anything >= 8, which only the worst
-  /// answer reaches.
   static const severityByLevel = [1, 4, 7, 10];
   static const alertThreshold = 8;
 
-  /// Builds the backend's observation list from the screen's answers.
-///   [levels]  question key -> 0 (best) .. 3 (worst)
-///   [numbers] question key -> typed number
-/// Unanswered questions are skipped. Each observation can carry
-/// observation_type, severity, numeric_value, unit and note.
+  static const _publishedFormCacheKey = 'published_checkin_form';
+  static String _todayCacheKey(String patientId) =>
+      'today_checkin_${patientId}_${Ist.dateParam(DateTime.now())}';
+  static String _historyCacheKey(String patientId) => 'symptom_history_$patientId';
+
   static List<Map<String, dynamic>> buildObservations({
     required Map<String, int?> levels,
     Map<String, double?> numbers = const {},
@@ -94,43 +99,88 @@ class CheckInService {
   static bool hasSevere(List<Map<String, dynamic>> observations) =>
       observations.any((o) => o['severity'] is int && (o['severity'] as int) >= alertThreshold);
 
-  /// Random UUID v4, sent as `client_event_id` so a retried request cannot
-  /// record the same check-in twice. Keep the same id when retrying the same submission.
   static String newClientEventId() => Uuid.v4();
 
-  /// POST /api/symptoms/check-in. [source]: ROUTINE (the day's first check-in)
-  /// or UPDATE (an extra one later in the day).
+  /// POST /api/symptoms/check-in.
+  /// Offline-first: if offline, records the check-in locally, marks today's
+  /// check-in as completed, and enqueues the payload with `client_event_id`
+  /// so SyncEngine submits it idempotently when connectivity returns.
   Future<void> submit({
     required String patientId,
     required List<Map<String, dynamic>> observations,
     String source = 'ROUTINE',
     String? clientEventId,
   }) async {
-    await _api.post(ApiEndpoints.checkIn, body: {
+    final eventId = clientEventId ?? newClientEventId();
+    final payload = <String, dynamic>{
       'patient_id': patientId,
       'observations': observations,
       'source': source,
-      'client_event_id': clientEventId ?? newClientEventId(),
-    });
+      'client_event_id': eventId,
+    };
+
+    try {
+      await _api.post(ApiEndpoints.checkIn, body: payload);
+      await _recordLocalCheckIn(
+        patientId: patientId,
+        eventId: eventId,
+        source: source,
+        observations: observations,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+
+      await _recordLocalCheckIn(
+        patientId: patientId,
+        eventId: eventId,
+        source: source,
+        observations: observations,
+      );
+      await _cache.enqueueOperation(
+        operationId: eventId,
+        patientId: patientId,
+        operationType: 'SYMPTOM_CHECKIN',
+        endpoint: ApiEndpoints.checkIn,
+        httpMethod: 'POST',
+        payload: payload,
+      );
+      SyncEngine.instance.status.value =
+          SyncEngine.instance.status.value.copyWith(isOnline: false);
+    }
   }
 
-  /// GET /api/symptoms/check-in/form: the form the NGO has PUBLISHED.
-  /// Returns null only for 404 `NO_PUBLISHED_FORM` (the caller then falls back
-  /// to the built-in questions). Every other failure is rethrown so the screen
-  /// can show an error with a retry instead of silently using outdated data.
+  /// GET /api/symptoms/check-in/form.
+  /// Offline-first: caches the published NGO form. If offline, returns the
+  /// cached published form (or null so the screen uses built-in questions).
   Future<CheckInForm?> fetchPublishedForm() async {
     try {
       final res = await _api.get(ApiEndpoints.checkInForm);
-      return CheckInForm.fromJson(Map<String, dynamic>.from(res['data'] as Map));
+      final data = Map<String, dynamic>.from(res['data'] as Map);
+      await _cache.putCache(cacheKey: _publishedFormCacheKey, data: data);
+      return CheckInForm.fromJson(data);
     } on ApiException catch (e) {
-      if (e.statusCode == 404 && e.code == 'NO_PUBLISHED_FORM') return null;
-      rethrow;
+      if (e.statusCode == 404 && e.code == 'NO_PUBLISHED_FORM') {
+        await _cache.putCache(
+          cacheKey: _publishedFormCacheKey,
+          data: {'no_published_form': true},
+        );
+        return null;
+      }
+      if (e.statusCode != null) rethrow;
+
+      final cached = await _cache.getCache(_publishedFormCacheKey);
+      if (cached != null && cached.data is Map) {
+        final map = Map<String, dynamic>.from(cached.data as Map);
+        if (map['no_published_form'] == true) return null;
+        return CheckInForm.fromJson(map);
+      }
+      // No cached NGO form yet while offline -> fall back to built-in check-in questions
+      return null;
     }
   }
 
   /// POST /api/symptoms/check-in with the versioned, form-based payload.
-  /// [observations] holds only the mapped established clinical fields (see
-  /// ClinicalObservationMapper); they alone feed the deterioration rule.
+  /// Offline-first: saves locally and queues for idempotent sync when offline.
   Future<void> submitForm({
     required String patientId,
     required String formVersionId,
@@ -139,26 +189,124 @@ class CheckInService {
     required String clientEventId,
     String source = 'ROUTINE',
   }) async {
-    await _api.post(ApiEndpoints.checkIn, body: {
+    final payload = <String, dynamic>{
       'patient_id': patientId,
       'client_event_id': clientEventId,
       'form_version_id': formVersionId,
       'answers': answers.map((a) => a.toJson()).toList(),
       'observations': observations,
       'source': source,
-    });
+    };
+
+    try {
+      await _api.post(ApiEndpoints.checkIn, body: payload);
+      await _recordLocalCheckIn(
+        patientId: patientId,
+        eventId: clientEventId,
+        source: source,
+        observations: observations,
+        formVersionId: formVersionId,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+
+      await _recordLocalCheckIn(
+        patientId: patientId,
+        eventId: clientEventId,
+        source: source,
+        observations: observations,
+        formVersionId: formVersionId,
+      );
+      await _cache.enqueueOperation(
+        operationId: clientEventId,
+        patientId: patientId,
+        operationType: 'SYMPTOM_CHECKIN_FORM',
+        endpoint: ApiEndpoints.checkIn,
+        httpMethod: 'POST',
+        payload: payload,
+      );
+      SyncEngine.instance.status.value =
+          SyncEngine.instance.status.value.copyWith(isOnline: false);
+    }
   }
 
   /// GET /api/symptoms/today/:patientId (resets at 00:00 IST).
   Future<bool> completedToday(String patientId) async {
-    final res = await _api.get(ApiEndpoints.todayCheckIn(patientId));
-    final data = res['data'] as Map<String, dynamic>;
-    return data['completed'] as bool;
+    final key = _todayCacheKey(patientId);
+    try {
+      final res = await _api.get(ApiEndpoints.todayCheckIn(patientId));
+      final data = res['data'] as Map<String, dynamic>;
+      final completed = data['completed'] as bool;
+      await _cache.putCache(
+        cacheKey: key,
+        patientId: patientId,
+        data: {'completed': completed},
+      );
+      return completed;
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+      final cached = await _cache.getCache(key);
+      if (cached != null && cached.data is Map) {
+        return (cached.data as Map)['completed'] == true;
+      }
+      return false;
+    }
   }
 
   /// GET /api/symptoms/history/:patientId: the last 30 check-ins, newest first.
   Future<List<SymptomEvent>> history(String patientId) async {
-    final res = await _api.get(ApiEndpoints.symptomHistory(patientId));
-    return (res['data'] as List).map((e) => SymptomEvent.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    final key = _historyCacheKey(patientId);
+    try {
+      final res = await _api.get(ApiEndpoints.symptomHistory(patientId));
+      final rawList = (res['data'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      await _cache.putCache(cacheKey: key, patientId: patientId, data: rawList);
+      return rawList.map(SymptomEvent.fromJson).toList();
+    } on ApiException catch (e) {
+      if (e.statusCode != null) rethrow;
+      final cached = await _cache.getCache(key);
+      if (cached != null && cached.data is List) {
+        return (cached.data as List)
+            .map((e) => SymptomEvent.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      return const <SymptomEvent>[];
+    }
+  }
+
+  Future<void> _recordLocalCheckIn({
+    required String patientId,
+    required String eventId,
+    required String source,
+    required List<Map<String, dynamic>> observations,
+    String? formVersionId,
+  }) async {
+    await _cache.putCache(
+      cacheKey: _todayCacheKey(patientId),
+      patientId: patientId,
+      data: {'completed': true},
+    );
+
+    final historyKey = _historyCacheKey(patientId);
+    final cached = await _cache.getCache(historyKey);
+    final list = <Map<String, dynamic>>[];
+    if (cached != null && cached.data is List) {
+      for (final item in cached.data as List) {
+        if (item is Map) list.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    final localEvent = SymptomEvent(
+      id: eventId,
+      source: source,
+      recordedAt: DateTime.now(),
+      observations: observations.map(SymptomObservation.fromJson).toList(),
+      formVersionId: formVersionId,
+    );
+
+    list.removeWhere((item) => item['id'] == eventId);
+    list.insert(0, localEvent.toJson());
+    await _cache.putCache(cacheKey: historyKey, patientId: patientId, data: list);
   }
 }

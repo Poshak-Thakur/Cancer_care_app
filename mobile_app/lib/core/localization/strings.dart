@@ -51,8 +51,8 @@ class S {
     'followUpTime': ['Tomorrow · 11:30 AM', 'कल · सुबह 11:30'],
     'eatingWell': ['Eating well during treatment', 'इलाज के दौरान अच्छा खाना'],
     'reviewedByOrg': [
-      'Reviewed by an authorized Saathi/NGO reviewer',
-      'अधिकृत Saathi/NGO समीक्षक द्वारा समीक्षित'
+      'Reviewed by an authorized Dost/NGO reviewer',
+      'अधिकृत Dost/NGO समीक्षक द्वारा समीक्षित'
     ],
     // Community
     'communitySub': ['Stories from people who understand', 'उन लोगों की कहानियां जो समझते हैं'],
@@ -60,8 +60,8 @@ class S {
     'reply': ['Reply', 'जवाब दें'],
     'beingReviewed': ['Being reviewed', 'समीक्षा जारी है'],
     'reviewedOn': [
-      'Reviewed by an authorized Saathi/NGO reviewer · 12 Sep',
-      'अधिकृत Saathi/NGO समीक्षक द्वारा समीक्षित · 12 सितंबर'
+      'Reviewed by an authorized Dost/NGO reviewer · 12 Sep',
+      'अधिकृत Dost/NGO समीक्षक द्वारा समीक्षित · 12 सितंबर'
     ],
     'composeTitle': ['Share with your community', 'अपने समुदाय के साथ साझा करें'],
     'composeSub': [
@@ -120,32 +120,60 @@ class S {
     'sonFullAccess': ['Son · Full access', 'बेटा · पूर्ण पहुंच'],
     'signOut': ['Sign out', 'साइन आउट करें'],
 
+    // Profile Email Linking (for code-activated patients)
+    'emailNotLinkedYet': ['Email not added yet (optional)', 'ईमेल अभी नहीं जोड़ा गया (वैकल्पिक)'],
+    'linkEmailTitle': ['Add your email address (optional)', 'अपना ईमेल पता जोड़ें (वैकल्पिक)'],
+    'linkEmailSub': [
+      'You opened Dost with an invitation code. Add an email whenever you want so you can sign in on another phone later.',
+      'आपने आमंत्रण कोड से Dost खोला है। जब चाहें अपना ईमेल जोड़ें ताकि बाद में किसी दूसरे फ़ोन पर भी साइन इन कर सकें।'
+    ],
+    'linkEmailSendOtp': ['Send verification code', 'सत्यापन कोड भेजें'],
+    'linkEmailVerifyBtn': ['Verify & link email', 'सत्यापित करें और ईमेल जोड़ें'],
+    'linkEmailOtpHint': ['6-digit code', '6 अंकों का कोड'],
+    'linkEmailCodeSent': ['Verification code sent to your email.', 'आपके ईमेल पर सत्यापन कोड भेज दिया गया है।'],
+    'linkEmailSuccess': ['Email linked to your Dost account.', 'आपका ईमेल आपके Dost खाते से जुड़ गया है।'],
+
+    // Offline & Sync messages
+    'offlineSavedQueue': [
+      'Saved on this phone. Will sync automatically when internet returns.',
+      'इस फ़ोन में सहेज लिया गया। इंटरनेट आने पर अपने-आप सिंक हो जाएगा।'
+    ],
+    'offlineBanner': [
+      'Offline mode · Showing saved data on this phone',
+      'ऑफ़लाइन मोड · इस फ़ोन में सहेजा गया डेटा दिख रहा है'
+    ],
+    'helpNowOfflineTitle': ['Offline — Help request not sent', 'ऑफ़लाइन — मदद का अनुरोध नहीं भेजा जा सका'],
+    'helpNowOfflineBody': [
+      'Your phone has no internet connection right now, so Dost could NOT alert your care team online. Please call your emergency contact or use your phone network directly.',
+      'आपके फ़ोन में अभी इंटरनेट नहीं है, इसलिए Dost आपकी केयर टीम को ऑनलाइन अलर्ट नहीं भेज सका। कृपया सीधे फ़ोन कॉल का उपयोग करें।'
+    ],
+
     // Auth & onboarding
     'tagline': ['No one should walk through this alone', 'इस सफ़र में कोई अकेला न चले'],
-    'welcomeTitle': ['Welcome to Saathi', 'Saathi में आपका स्वागत है'],
-    'haveCode': ['I have a code from Saathi', 'मेरे पास Saathi का कोड है'],
-    'claimTitle': ['Enter your Saathi code', 'अपना Saathi कोड दर्ज करें'],
+    'welcomeTitle': ['Welcome to Dost', 'Dost में आपका स्वागत है'],
+    'haveCode': ['I have a code from Dost', 'मेरे पास Dost का कोड है'],
+    'claimTitle': ['Enter your Dost code', 'अपना Dost कोड दर्ज करें'],
     'claimSub': [
-      'Saathi has already set up your record. Enter the 8-character code they gave you, then sign in with your email.',
-      'Saathi ने आपका रिकॉर्ड पहले से तैयार किया है। उनका दिया 8 अक्षरों का कोड दर्ज करें, फिर अपने ईमेल से साइन इन करें।'
+      'Dost has already set up your record. Enter the 8-character code they gave you to open your care dashboard directly. You can add your email later in Profile.',
+      'Dost ने आपका रिकॉर्ड पहले से तैयार किया है। सीधे अपना डैशबोर्ड खोलने के लिए 8 अक्षरों का कोड दर्ज करें। आप बाद में प्रोफ़ाइल में जाकर ईमेल जोड़ सकते हैं।'
     ],
-    'claimCodeLabel': ['Saathi code', 'Saathi कोड'],
+    'claimCodeLabel': ['Dost code', 'Dost कोड'],
     'claimCodeHint': ['e.g. A1B2C3D4', 'जैसे A1B2C3D4'],
     'claimCodeInvalid': ['The code has 8 letters or numbers.', 'कोड में 8 अक्षर या अंक होते हैं।'],
-    'claimContinue': ['Continue', 'आगे बढ़ें'],
-    'claimUsing': ['Using Saathi code', 'Saathi कोड इस्तेमाल हो रहा है'],
+    'claimContinue': ['Continue to Dost', 'Dost में आगे बढ़ें'],
+    'claimUsing': ['Using Dost code', 'Dost कोड इस्तेमाल हो रहा है'],
     'claimChange': ['Change', 'बदलें'],
     'claimNoCode': ["I don't have a code: create my profile", 'मेरे पास कोड नहीं है: मेरी प्रोफ़ाइल बनाएं'],
     'claimInvalid': ['Invalid or expired code.', 'कोड गलत है या समाप्त हो गया है।'],
-    'claimAlreadySetUp': ['This record is already set up. Please contact Saathi.', 'यह रिकॉर्ड पहले से तैयार है। कृपया Saathi से संपर्क करें।'],
+    'claimAlreadySetUp': ['This record is already set up. Please contact Dost.', 'यह रिकॉर्ड पहले से तैयार है। कृपया Dost से संपर्क करें।'],
     'claimTooMany': ['Too many attempts, try again later.', 'बहुत ज़्यादा कोशिशें हुईं, कृपया बाद में दोबारा कोशिश करें।'],
     'claimBlockedTitle': ["We couldn't link your record", 'हम आपका रिकॉर्ड जोड़ नहीं सके'],
     'aboutPatient': ['About', 'के बारे में'],
     'claimRetryFailed': ["Couldn't continue. Please check your connection and try again.", 'आगे नहीं बढ़ सके। कृपया कनेक्शन जांचें और दोबारा कोशिश करें।'],
     'editPatientRecord': ['Edit patient record', 'मरीज़ का रिकॉर्ड बदलें'],
     'editPatientRecordSub': [
-      'Check the details Saathi has for you and correct anything that is wrong.',
-      'Saathi के पास आपकी जो जानकारी है उसे जांचें और गलत हो तो सुधारें।'
+      'Check the details Dost has for you and correct anything that is wrong.',
+      'Dost के पास आपकी जो जानकारी है उसे जांचें और गलत हो तो सुधारें।'
     ],
     'cancerTypeOnly': ['Cancer type', 'कैंसर का प्रकार'],
     'iAmA': ['I am signing in as', 'मैं इस रूप में साइन इन कर रहा/रही हूँ'],
@@ -183,7 +211,7 @@ class S {
       'हम यहाँ कैंसर के प्रकार या इलाज की जानकारी नहीं पूछते। बाद में किसी सुविधा को इनकी ज़रूरत हुई तो हम कारण बताएंगे, और आप छोड़ सकती हैं।'
     ],
     'getStarted': ['Get started', 'शुरू करें'],
-    'signOutTitle': ['Sign out of Saathi?', 'Saathi से साइन आउट करें?'],
+    'signOutTitle': ['Sign out of Dost?', 'Dost से साइन आउट करें?'],
     'signOutBody': [
       'Your check-ins stay saved on this phone. You can sign back in any time with your email.',
       'आपकी जांच इस फ़ोन में सहेजी रहेंगी। आप कभी भी अपने ईमेल से दोबारा साइन इन कर सकती हैं।'
@@ -218,17 +246,27 @@ class S {
     'approvedBadge': ['Reviewed by the NGO team', 'NGO टीम द्वारा जाँचा गया'],
     'audioCall': ['Audio call', 'ऑडियो कॉल'],
     'videoCall': ['Video call', 'वीडियो कॉल'],
-    'audioFailed': ['Couldn\'t play this voice note.', 'यह वॉइस नोट नहीं चल सका।'],
+    'audioFailed': ["Couldn't play this voice note.", 'यह वॉइस नोट नहीं चल सका।'],
     'availAvailable': ['Available', 'उपलब्ध'],
     'availUnavailable': ['Unavailable', 'अनुपलब्ध'],
     'availDnd': ['Do not disturb', 'परेशान न करें'],
     'myAvailability': ['My availability', 'मेरी उपलब्धता'],
     'callDeclined': ['The call was declined.', 'कॉल अस्वीकार कर दी गई।'],
     'callEnded': ['The call has ended.', 'कॉल समाप्त हो गई।'],
-    'callFailed': ['The call couldn\'t connect.', 'कॉल नहीं जुड़ सकी।'],
+    'callFailed': ["The call couldn't connect.", 'कॉल नहीं जुड़ सकी।'],
     'callMissed': ['Missed call.', 'छूटी हुई कॉल।'],
     'callNoAnswer': ['No answer.', 'कोई उत्तर नहीं।'],
-    'callPermissionDenied': ['Saathi needs microphone (and camera for video) access to make calls.', 'कॉल करने के लिए Saathi को माइक्रोफ़ोन (और वीडियो के लिए कैमरा) की अनुमति चाहिए।'],
+    'callEndedTitle': ['This call has ended', 'यह कॉल समाप्त हो चुकी है'],
+    'callEndedSub': [
+      'The caller is no longer waiting, or the call was already finished.',
+      'कॉल करने वाला अब प्रतीक्षा में नहीं है, या कॉल पहले ही समाप्त हो चुकी है।'
+    ],
+    'callEndedNetSub': [
+      "We couldn't reach the server to answer. If the caller is still trying, ask them to call again.",
+      'जवाब देने के लिए सर्वर तक नहीं पहुंच सके। अगर कॉल करने वाला अब भी कोशिश कर रहा है, तो उनसे दोबारा कॉल करने को कहें।'
+    ],
+    'goHome': ['Go to home', 'होम पर जाएं'],
+    'callPermissionDenied': ['Dost needs microphone (and camera for video) access to make calls.', 'कॉल करने के लिए Dost को माइक्रोफ़ोन (और वीडियो के लिए कैमरा) की अनुमति चाहिए।'],
     'calling': ['Calling…', 'कॉल कर रहे हैं…'],
     'connecting': ['Connecting…', 'जोड़ रहे हैं…'],
     'close': ['Close', 'बंद करें'],
@@ -242,7 +280,7 @@ class S {
     'voiceTooShort': ['Hold on a little longer: the voice note was too short.', 'वॉइस नोट बहुत छोटा था। थोड़ी देर और बोलें।'],
     'voiceSendFailed': ["Couldn't send the voice note. Please try again.", 'वॉइस नोट नहीं भेजा जा सका। कृपया दोबारा कोशिश करें।'],
     'voiceUnavailable': ["Can't play (expired?)", 'नहीं चल सका (समय समाप्त?)'],
-    'callIncomingTitle': ['Saathi call', 'साथी कॉल'],
+    'callIncomingTitle': ['Dost call', 'Dost कॉल'],
     'noCareTeam': ['No one is linked to your care team yet.', 'अभी कोई आपकी देखभाल टीम से जुड़ा नहीं है।'],
     'noMessagesYet': ['No messages yet. Say hello.', 'अभी कोई संदेश नहीं। नमस्ते कहें।'],
     'send': ['Send', 'भेजें'],
@@ -255,7 +293,7 @@ class S {
     'cgVolunteer': ['Volunteer', 'स्वयंसेवक'],
     'cgVolunteerSub': ['Trained NGO volunteer', 'प्रशिक्षित NGO स्वयंसेवक'],
     'cgVolunteerNote': ['Volunteers support patients they are linked to through an invite code.', 'स्वयंसेवक उन मरीज़ों की सहायता करते हैं जिनसे वे निमंत्रण कोड से जुड़ते हैं।'],
-    'cgWelcome': ['Set up your caregiver account', 'अपना देखभालकर्ता खाता बनाएँ'],
+    'cgWelcome': ['Set up your caregiver account', 'अपना देखभालकर्ता खाता बनाएं'],
     'cgWelcomeSub': ['Tell us a little about you. You can link a patient any time later from your profile.', 'अपने बारे में थोड़ा बताएं। मरीज़ से आप बाद में कभी भी प्रोफ़ाइल से जुड़ सकते हैं।'],
     'continueBtn': ['Continue', 'आगे बढ़ें'],
     'checkinNotDone': ['No check-in yet today', 'आज अभी जांच नहीं हुई'],
@@ -264,13 +302,13 @@ class S {
     'copyCode': ['Copy code', 'कोड कॉपी करें'],
     'pasteCode': ['Paste code', 'कोड पेस्ट करें'],
     'scanQr': ['Scan QR', 'QR स्कैन करें'],
-    'generateInvite': ['Create invite code', 'निमंत्रण कोड बनाएँ'],
-    'newInvite': ['Create a new code', 'नया कोड बनाएँ'],
+    'generateInvite': ['Create invite code', 'निमंत्रण कोड बनाएं'],
+    'newInvite': ['Create a new code', 'नया कोड बनाएं'],
     'inviteCaregiver': ['Invite a family caregiver', 'परिवार के देखभालकर्ता को आमंत्रित करें'],
     'inviteCaregiverSub': ['Let a family member follow your care', 'परिवार के सदस्य को आपकी देखभाल देखने दें'],
     'inviteCodeHint': ['Paste the invite code here', 'निमंत्रण कोड यहाँ पेस्ट करें'],
-    'inviteExplain': ['Create a code and share it with a family member. When they enter it in their Saathi app, they can see your dashboard and message your care team. The code works for 7 days.', 'एक कोड बनाकर परिवार के सदस्य को दें। जब वे इसे अपने Saathi ऐप में डालेंगे, तो वे आपका डैशबोर्ड देख सकेंगे और आपकी देखभाल टीम को संदेश भेज सकेंगे। कोड 7 दिन तक चलता है।'],
-    'inviteHowTo': ['Ask the patient to open Profile → Invite a family caregiver, then scan their QR code or paste their code here.', 'मरीज़ से प्रोफ़ाइल → परिवार के देखभालकर्ता को आमंत्रित करें खुलवाएँ, फिर उनका QR स्कैन करें या कोड यहाँ पेस्ट करें।'],
+    'inviteExplain': ['Create a code and share it with a family member. When they enter it in their Dost app, they can see your dashboard and message your care team. The code works for 7 days.', 'एक कोड बनाकर परिवार के सदस्य को दें। जब वे इसे अपने Dost ऐप में डालेंगे, तो वे आपका डैशबोर्ड देख सकेंगे और आपकी देखभाल टीम को संदेश भेज सकेंगे। कोड 7 दिन तक चलता है।'],
+    'inviteHowTo': ['Ask the patient to open Profile → Invite a family caregiver, then scan their QR code or paste their code here.', 'मरीज़ से प्रोफ़ाइल → परिवार के देखभालकर्ता को आमंत्रित करें खुलवाएं, फिर उनका QR स्कैन करें या कोड यहाँ पेस्ट करें।'],
     'inviteValid': ['Valid for 7 days. Only share it with someone you trust.', '7 दिन के लिए मान्य। इसे केवल भरोसेमंद व्यक्ति को दें।'],
     'linkPatient': ['Link to patient', 'मरीज़ से जुड़ें'],
     'linkedOk': ['You are now linked to this patient.', 'आप अब इस मरीज़ से जुड़ गए हैं।'],
@@ -315,7 +353,7 @@ class S {
     'checkDetails': ['Please check these details and fix anything that looks wrong.', 'कृपया ये विवरण जांचें और जो गलत लगे उसे ठीक करें।'],
     'checkInForPatient': ['Do a check-in for them', 'उनकी ओर से जांच करें'],
     'checkInForPatientSub': ['Record how they are feeling today', 'आज वे कैसा महसूस कर रहे हैं, दर्ज करें'],
-    'checkinAlreadyDone': ['You\'ve already checked in today. This will be saved as an update.', 'आप आज जांच कर चुके हैं। यह अपडेट के रूप में सेव होगा।'],
+    'checkinAlreadyDone': ["You've already checked in today. This will be saved as an update.", 'आप आज जांच कर चुके हैं। यह अपडेट के रूप में सेव होगा।'],
     'checkinHistory': ['Check-in history', 'जांच का इतिहास'],
     'checkinHistorySub': ['Your last 30 check-ins', 'पिछली 30 जांचें'],
     'checkinNoteHint': ['Anything else you want your care team to know? (optional)', 'कुछ और जो आप केयर टीम को बताना चाहें? (वैकल्पिक)'],
@@ -370,7 +408,7 @@ class S {
     'noNewMessages': ['No new messages', 'कोई नया संदेश नहीं'],
     'note': ['Note', 'नोट'],
     'onlyCounsellor': ['Share only with my counsellor', 'केवल मेरी काउंसलर के साथ साझा करें'],
-    'parseFailed': ['We couldn\'t understand that. Try again or fill it in manually.', 'हम समझ नहीं पाए। फिर कोशिश करें या खुद भरें।'],
+    'parseFailed': ["We couldn't understand that. Try again or fill it in manually.", 'हम समझ नहीं पाए। फिर कोशिश करें या खुद भरें।'],
     'pendingBadge': ['Pending review', 'समीक्षा बाकी'],
     'phoneHint': ['10-digit mobile number', '10 अंकों का मोबाइल नंबर'],
     'phoneNumber': ['Phone number', 'फ़ोन नंबर'],
@@ -392,7 +430,7 @@ class S {
     'saveChanges': ['Save changes', 'बदलाव सेव करें'],
     'saveEvent': ['Save to care plan', 'केयर प्लान में सेव करें'],
     'scanAnother': ['Scan another', 'एक और स्कैन करें'],
-    'scanFailed': ['We couldn\'t read that prescription. Please try again.', 'हम वह पर्चा पढ़ नहीं सके। कृपया फिर कोशिश करें।'],
+    'scanFailed': ["We couldn't read that prescription. Please try again.", 'हम वह पर्चा पढ़ नहीं सके। कृपया फिर कोशिश करें।'],
     'scanHelp': ['Take a clear photo of the prescription. We will read the medicines and you can check them before saving.', 'पर्चे की साफ़ फ़ोटो लें। हम दवाइयाँ पढ़ेंगे और सेव करने से पहले आप जांच सकेंगे।'],
     'scanPrescription': ['Scan a prescription', 'पर्चा स्कैन करें'],
     'scheduleHelp': ['Type or say it in your own words, and we will fill in the details.', 'अपने शब्दों में लिखें या बोलें, हम विवरण भर देंगे।'],
@@ -439,12 +477,12 @@ class S {
     'unitHours': ['hours', 'घंटे'],
     'enterNumber': ['Enter a number', 'संख्या लिखें'],
     'awaitingReview': ['Awaiting review by a moderator', 'मॉडरेटर की समीक्षा बाकी'],
-    'leavePatient': ['Stop supporting this patient','इस मरीज़ की सहायता बंद करें'],
-    'leavePatientBody': ['You will no longer see this patient. They can invite you again later.','आप इस मरीज़ को नहीं देख पाएंगे। वे बाद में फिर आमंत्रित कर सकते हैं।'],
+    'leavePatient': ['Stop supporting this patient', 'इस मरीज़ की सहायता बंद करें'],
+    'leavePatientBody': ['You will no longer see this patient. They can invite you again later.', 'आप इस मरीज़ को नहीं देख पाएंगे। वे बाद में फिर आमंत्रित कर सकते हैं।'],
     'accessRevoked': ['Access to this patient has been revoked.', 'इस मरीज़ तक आपकी पहुँच हटा दी गई है।'],
     'limitedAccess': ['Limited access', 'सीमित पहुँच'],
-    'limitedAccessSub': ['Your account is not allowed to see or change this part of the patient\'s care. You can still use messages and the community.', 'आपके खाते को मरीज़ की देखभाल के इस हिस्से को देखने या बदलने की अनुमति नहीं है। आप संदेश और समुदाय का उपयोग कर सकते हैं।'],
-    'notRecognized': ['Your caregiver account has not yet been recognized by the NGO. Please contact the Saathi NGO team before linking a patient.', 'आपके देखभालकर्ता खाते को NGO ने अभी मान्यता नहीं दी है। मरीज़ से जुड़ने से पहले कृपया साथी NGO टीम से संपर्क करें।'],
+    'limitedAccessSub': ["Your account is not allowed to see or change this part of the patient's care. You can still use messages and the community.", 'आपके खाते को मरीज़ की देखभाल के इस हिस्से को देखने या बदलने की अनुमति नहीं है। आप संदेश और समुदाय का उपयोग कर सकते हैं।'],
+    'notRecognized': ['Your caregiver account has not yet been recognized by the NGO. Please contact the Dost NGO team before linking a patient.', 'आपके देखभालकर्ता खाते को NGO ने अभी मान्यता नहीं दी है। मरीज़ से जुड़ने से पहले कृपया Dost NGO टीम से संपर्क करें।'],
     'notRecognizedWaiting': ['Your caregiver account is waiting for NGO recognition. Once the NGO recognizes you, the patients you link to will appear here. You can contact the NGO helpline from your profile.', 'आपका देखभालकर्ता खाता NGO की मान्यता की प्रतीक्षा में है। मान्यता मिलने के बाद आप जिन मरीज़ों से जुड़ेंगे वे यहाँ दिखेंगे। प्रोफ़ाइल से NGO हेल्पलाइन से संपर्क कर सकते हैं।'],
     'actingAs': ['Acting as', 'इनकी ओर से'],
     'recognizedBadge': ['Recognized by the NGO', 'NGO द्वारा मान्यता प्राप्त'],
@@ -502,7 +540,7 @@ class S {
     'alertDetailTitle': ['Alert', 'अलर्ट'],
     'alertNoLongerOpen': ['This alert is no longer open.', 'यह अलर्ट अब खुला नहीं है।'],
     'alertLoadFailed': ["Couldn't load this alert right now.", 'अभी यह अलर्ट लोड नहीं हो सका।'],
-    'criticalAlertFallback': ['Someone in your Saathi care circle may need attention.', 'आपकी साथी केयर टीम में किसी को ध्यान की ज़रूरत हो सकती है।'],
+    'criticalAlertFallback': ['Someone in your Dost care circle may need attention.', 'आपकी Dost केयर टीम में किसी को ध्यान की ज़रूरत हो सकती है।'],
   };
 
   /// Looks up a label. An unknown key shows the key itself instead of crashing.
@@ -510,7 +548,6 @@ class S {
     final v = _t[key];
     return v == null ? key : v[Lang.isHindi.value ? 1 : 0];
   }
-
 
   static String mustBeAtLeast(num n) => Lang.isHindi.value ? 'कम से कम $n होना चाहिए।' : 'Must be at least $n.';
   static String mustBeAtMost(num n) => Lang.isHindi.value ? 'अधिकतम $n होना चाहिए।' : 'Must be at most $n.';

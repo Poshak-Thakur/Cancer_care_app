@@ -200,7 +200,6 @@ ocr/env/
 
 ai/models/
 ocr/models/
-models/
 checkpoints/
 
 wandb/
