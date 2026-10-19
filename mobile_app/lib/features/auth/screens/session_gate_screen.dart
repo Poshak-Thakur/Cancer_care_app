@@ -17,15 +17,6 @@ import '../services/auth_state.dart';
 import '../services/session_router.dart';
 import 'login_screen.dart';
 
-/// Shown right after the splash.
-///
-/// Offline-first behavior:
-/// 1. If the user has already activated their account on this device
-///    ([TokenStorage.hasRefresh] and a cached workspace in [AuthState]),
-///    immediately opens the local PatientShell or CaregiverShell without
-///    waiting for the internet, then refreshes tokens & data in the background.
-/// 2. If there is no cached workspace yet, attempts an online session restore.
-/// 3. If no refresh token is saved, opens [LoginScreen] immediately (even offline).
 class SessionGateScreen extends StatefulWidget {
   const SessionGateScreen({super.key});
 
@@ -39,11 +30,19 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
   @override
   void initState() {
     super.initState();
-    _restore();
+    // Wait until the SplashScreen -> SessionGateScreen transition frame finishes
+    // so the Navigator is never locked ('!_debugLocked') when pushing the next route.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _restore();
+    });
   }
 
   Future<void> _restore() async {
-    if (_failed) setState(() => _failed = false);
+    if (_failed && mounted) setState(() => _failed = false);
+
+    // Yield a microtask so Navigator._debugLocked is guaranteed false
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
 
     // Case 1: Never signed in on this device -> go straight to LoginScreen (works offline)
     if (!TokenStorage.hasRefresh) {
@@ -54,9 +53,10 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
 
     // Case 2: Already activated locally -> open cached workspace immediately (offline-first!)
     await AuthState.restoreFromLocalCache();
+    if (!mounted) return;
+
     final offlineHome = SessionRouter.offlineDestinationIfReady();
     if (offlineHome != null) {
-      if (!mounted) return;
       SocketService.instance.start(AuthState.userId);
       AppRoutes.pushAndClear(context, offlineHome);
       CallCoordinator.onSessionReady();
@@ -64,7 +64,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
       return;
     }
 
-    // Case 3: Refresh token exists, but onboarding/workspace was never cached -> try online restore
+    // Case 3: Refresh token exists, but workspace was never cached -> try online restore
     try {
       final result = await AuthApiService().restoreSession();
       if (!mounted) return;
@@ -81,13 +81,10 @@ class _SessionGateScreenState extends State<SessionGateScreen> {
     }
   }
 
-  /// Runs silently in the background after an instant offline launch.
-  /// Only logs the user out if the server explicitly rejects the refresh token (401).
   Future<void> _refreshActivatedWorkspaceInBackground() async {
     try {
       final result = await AuthApiService().restoreSession();
       if (result == null) {
-        // Refresh token was explicitly rejected (401) by the server
         SessionEvents.expire();
         return;
       }

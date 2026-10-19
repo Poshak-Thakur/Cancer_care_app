@@ -1,19 +1,34 @@
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
 const path = require('path');
+const fs = require('fs');
 
 let isInitialized = false;
 
 try {
-    const serviceAccount = require(path.join(__dirname, '../../firebase-key.json'));
-    
-    // Modern v12+ Initialization
-    initializeApp({
-        credential: cert(serviceAccount)
-    });
-    
-    isInitialized = true;
-    console.log('✅ Firebase Admin SDK initialized successfully.');
+    let serviceAccount;
+    const jsonEnv = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+
+    if (jsonEnv) {
+        // Production: Load from Railway environment variable
+        serviceAccount = JSON.parse(jsonEnv);
+    } else {
+        // Local development fallback: Load from local file if present
+        const localKeyPath = path.join(__dirname, '../../firebase-key.json');
+        if (fs.existsSync(localKeyPath)) {
+            serviceAccount = require(localKeyPath);
+        }
+    }
+
+    if (serviceAccount) {
+        initializeApp({
+            credential: cert(serviceAccount)
+        });
+        isInitialized = true;
+        console.log('✅ Firebase Admin SDK initialized successfully.');
+    } else {
+        console.warn('⚠️ Firebase Admin SDK initialized in dummy mode (No credentials found). Push notifications will be skipped.');
+    }
 } catch (error) {
     console.error('❌ Failed to initialize Firebase Admin SDK:', error.message);
 }
@@ -48,7 +63,7 @@ exports.sendCallPushNotification = async (fcmToken, callData) => {
     }
 };
 
-// NEW: Tells the receiver's phone to stop ringing if the caller hangs up
+// Tells the receiver's phone to stop ringing if the caller hangs up
 exports.sendCallCancelledPush = async (fcmToken, callId) => {
     if (!fcmToken || !isInitialized) return;
     try {
@@ -79,7 +94,7 @@ exports.sendMessagePushNotification = async (fcmToken, { title, body, conversati
             },
             android: {
                 priority: 'normal',
-                notification: { sound: 'default' } // channelId removed so OS defaults work safely
+                notification: { sound: 'default' }
             },
             apns: {
                 payload: { aps: { sound: 'default' } }
@@ -91,12 +106,6 @@ exports.sendMessagePushNotification = async (fcmToken, { title, body, conversati
     }
 };
 
-/**
- * Sends one critical-alert push and REPORTS THE OUTCOME instead of swallowing it:
- *   { ok: true }                     FCM accepted the message (does NOT prove the device displayed it)
- *   { ok: false, reason: '<CODE>' }  it could not be handed to FCM
- * It never throws, so a caller can always record the result on the alertdelivery row.
- */
 exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId, patientId }) => {
     if (!fcmToken) return { ok: false, reason: 'NO_DEVICE_TOKEN' };
     if (!isInitialized) return { ok: false, reason: 'FIREBASE_NOT_INITIALIZED' };
@@ -114,14 +123,13 @@ exports.sendEmergencyAlertNotification = async (fcmToken, { title, body, alertId
             },
             android: {
                 priority: 'high',
-                notification: { sound: 'default' } // channelId removed so OS defaults work safely
+                notification: { sound: 'default' }
             }
         });
         console.log(`[FCM] Sent CRITICAL_ALERT notification to device.`);
         return { ok: true };
     } catch (err) {
         console.error('[FCM] Error sending alert notification:', err.message);
-        // Only the error CODE is stored (never the message, which can echo the device token).
         const code = String(err && err.code ? err.code : 'UNKNOWN').replace(/[^A-Za-z0-9/_.-]/g, '').slice(0, 80) || 'UNKNOWN';
         return { ok: false, reason: `FCM_ERROR:${code}` };
     }

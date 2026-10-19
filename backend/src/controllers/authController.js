@@ -121,16 +121,30 @@ exports.requestOtp = async (req, res, next) => {
     });
 
     try {
-      await transporter.sendMail({
-        from: `"Dost - The cancer care companion" <${process.env.SMTP_USER}>`,
-        to: cleanEmail,
-        subject: 'Your Dost Login Code',
-        text: `Your OTP code is: ${rawOtp}\n\nIt will expire in 10 minutes.`,
-      });
+      if (typeof transporter.sendOtpEmail === 'function') {
+        await transporter.sendOtpEmail(cleanEmail, rawOtp, 'Your Dost Login Code');
+      } else {
+        await transporter.sendMail({
+          from: `"Dost - The cancer care companion" <${process.env.SMTP_USER}>`,
+          to: cleanEmail,
+          subject: 'Your Dost Login Code',
+          text: `Your OTP code is: ${rawOtp}\n\nIt will expire in 10 minutes.`,
+        });
+      }
       console.log(`[EMAIL SENT] OTP sent to ${cleanEmail}`);
       return res.status(200).json({ status: 'success', message: 'OTP sent successfully.' });
     } catch (err) {
-      console.error('[EMAIL ERROR] Failed to send OTP email:', err);
+      console.error('[EMAIL ERROR] Failed to send OTP email:', err.message || err);
+      // In local development, print the OTP to the terminal if SMTP is blocked/unreachable
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('\n========================================');
+        console.log(`[LOCAL DEV OTP] ${cleanEmail} -> ${rawOtp}`);
+        console.log('========================================\n');
+        return res.status(200).json({
+          status: 'success',
+          message: 'OTP generated (check backend terminal in dev mode).',
+        });
+      }
       return res.status(500).json({
         status: 'error',
         message: 'Failed to send verification email. Please try again later.',
@@ -601,19 +615,38 @@ exports.requestLinkEmailOtp = async (req, res, next) => {
     });
 
     try {
-      await transporter.sendMail({
-        from: `"Dost - The cancer care companion" <${process.env.SMTP_USER}>`,
-        to: cleanEmail,
-        subject: 'Verify your email address for Dost',
-        text: `Your verification code is: ${rawOtp}\n\nIt will expire in 10 minutes.`,
-      });
+      if (typeof transporter.sendOtpEmail === 'function') {
+        await transporter.sendOtpEmail(
+          cleanEmail,
+          rawOtp,
+          'Verify your email address for Dost'
+        );
+      } else {
+        await transporter.sendMail({
+          from: `"Dost - The cancer care companion" <${process.env.SMTP_USER}>`,
+          to: cleanEmail,
+          subject: 'Verify your email address for Dost',
+          text: `Your verification code is: ${rawOtp}\n\nIt will expire in 10 minutes.`,
+        });
+      }
       return res.status(200).json({
         status: 'success',
         message: 'Verification code sent to your email.',
         email: cleanEmail,
       });
     } catch (err) {
-      console.error('[EMAIL ERROR] Failed to send linking OTP email:', err);
+      console.error('[EMAIL ERROR] Failed to send linking OTP email:', err.message || err);
+      // In local development, print the OTP to the terminal if SMTP is blocked/unreachable
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('\n========================================');
+        console.log(`[LOCAL DEV LINK-EMAIL OTP] ${cleanEmail} -> ${rawOtp}`);
+        console.log('========================================\n');
+        return res.status(200).json({
+          status: 'success',
+          message: 'Verification code generated (check backend terminal in dev mode).',
+          email: cleanEmail,
+        });
+      }
       return res
         .status(500)
         .json({ status: 'error', message: 'Failed to send verification email.' });

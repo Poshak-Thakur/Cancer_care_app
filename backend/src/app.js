@@ -20,6 +20,8 @@ const HttpError = require('./utils/httpError');
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 // Explicit, environment-configured origin allowlist (CORS_ALLOWED_ORIGINS) - never '*' with credentials.
 app.use(cors(createCorsOptions()));
 

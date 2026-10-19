@@ -1,8 +1,10 @@
 {
-  "name": "backend",
+  "name": "dost-backend",
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
+    "postinstall": "prisma generate",
+    "build": "prisma generate",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "prisma:generate": "prisma generate",
@@ -13,7 +15,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Dost - The cancer care companion (Backend API)",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@prisma/adapter-pg": "^7.10.0",
@@ -31,10 +33,10 @@
     "node-cron": "^4.6.0",
     "nodemailer": "^10.0.15",
     "pg": "^8.23.1",
+    "prisma": "7.10.0",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14",
-    "prisma": "7.10.0"
+    "nodemon": "^3.1.14"
   }
 }

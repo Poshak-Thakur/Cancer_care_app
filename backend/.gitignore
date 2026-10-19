@@ -17,3 +17,7 @@ yarn-error.log*
 
 firebase-key.json
 testMailer.js
+
+
+firebase-key.json
+backend/firebase-key.json
